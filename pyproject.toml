@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "autonomous-shopping-cart"
+version = "0.1.0"
+description = "Dashboard and Pi agent for an autonomous shopping cart prototype."
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+  "fastapi>=0.116",
+  "httpx>=0.28",
+  "pillow>=11.0",
+  "pydantic>=2.8",
+  "uvicorn>=0.32",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4",
+]
+pi = [
+  "gpiozero>=2.0",
+  "opencv-python>=4.10",
+]
+
+[tool.setuptools.packages.find]
+include = ["cart_stack*"]
+

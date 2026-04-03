@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Veda Cart Console</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=DM+Sans:wght@400;500;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/static/styles.css" />
+  </head>
+  <body>
+    <div class="desktop-sidebar">
+      <section class="sb-card brand-card">
+        <h3>Veda Cart</h3>
+        <p>
+          Autonomous shopping cart control surface. Live camera, follow mode, manual drive, and
+          a direct line into the Pi.
+        </p>
+      </section>
+
+      <section class="sb-card">
+        <h3>Device</h3>
+        <div class="sb-row">
+          <span class="sb-lbl">Pi Agent</span>
+          <span class="sb-val" id="deviceAgent">Checking...</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Camera</span>
+          <span class="sb-val" id="deviceCamera">Waiting...</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Controller</span>
+          <span class="sb-val" id="deviceMode">Manual</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">IP</span>
+          <span class="sb-val mono" id="deviceIp">10.65.142.17</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Left GPIO</span>
+          <span class="sb-val mono" id="deviceLeftPin">18</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Right GPIO</span>
+          <span class="sb-val mono" id="deviceRightPin">13</span>
+        </div>
+        <form id="connectForm" class="connect-stack">
+          <label class="connect-label" for="targetInput">Pi Address</label>
+          <input
+            id="targetInput"
+            name="target"
+            type="text"
+            inputmode="decimal"
+            autocomplete="off"
+            spellcheck="false"
+            placeholder="10.65.142.17"
+            value="10.65.142.17"
+          />
+          <div class="connect-actions">
+            <button type="submit" class="btn-primary">Connect</button>
+            <button type="button" id="disconnectButton" class="btn-secondary">Disconnect</button>
+          </div>
+        </form>
+        <form id="pinForm" class="pin-stack">
+          <div class="pin-head">
+            <span class="connect-label">Motor Pins (BCM)</span>
+            <span class="pin-note">Recommended pair: left 12, right 13</span>
+          </div>
+          <div class="pin-grid">
+            <label>
+              <span class="pin-label">Left</span>
+              <input id="leftPinInput" name="leftPin" type="number" min="0" max="27" step="1" value="12" />
+            </label>
+            <label>
+              <span class="pin-label">Right</span>
+              <input id="rightPinInput" name="rightPin" type="number" min="0" max="27" step="1" value="13" />
+            </label>
+          </div>
+          <button type="submit" class="btn-secondary">Apply Pins</button>
+        </form>
+        <form id="trimForm" class="pin-stack">
+          <div class="pin-head">
+            <span class="connect-label">Servo Trim</span>
+            <span class="pin-note">Use this if stop still creeps</span>
+          </div>
+          <div class="pin-grid trim-grid">
+            <label>
+              <span class="pin-label">Left Trim</span>
+              <input id="leftTrimInput" name="leftTrim" type="number" min="-1" max="1" step="0.01" value="0.00" />
+            </label>
+            <label>
+              <span class="pin-label">Right Trim</span>
+              <input id="rightTrimInput" name="rightTrim" type="number" min="-1" max="1" step="0.01" value="0.00" />
+            </label>
+            <label class="trim-span">
+              <span class="pin-label">Stop Deadband</span>
+              <input id="deadbandInput" name="deadband" type="number" min="0" max="0.2" step="0.01" value="0.04" />
+            </label>
+          </div>
+          <button type="submit" class="btn-secondary">Apply Trim</button>
+        </form>
+      </section>
+
+      <section class="sb-card">
+        <h3>Session</h3>
+        <div class="sb-row">
+          <span class="sb-lbl">Last Command</span>
+          <span class="sb-val" id="sessionLastCommand">idle</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Distance</span>
+          <span class="sb-val" id="sessionDistance">0.00 m</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Target Gap</span>
+          <span class="sb-val" id="sessionGap">0.65 m</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Speed</span>
+          <span class="sb-val" id="sessionSpeed">0.00 m/s</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Turn Rate</span>
+          <span class="sb-val" id="sessionTurn">0.00 rad/s</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">Latency</span>
+          <span class="sb-val" id="sessionLatency">0 ms</span>
+        </div>
+      </section>
+    </div>
+
+    <main class="app-shell">
+      <div class="device-pill"></div>
+      <header class="status-bar">
+        <span id="clock">9:41</span>
+        <span>WiFi <span class="wifi-dot"></span></span>
+      </header>
+
+      <section class="screen active">
+        <div class="screen-scroll">
+          <div class="scan-hdr">
+            <button class="back" type="button" aria-label="Refresh status" id="refreshButton">&larr;</button>
+            <h2>Live Cart</h2>
+            <span class="conn-pill err" id="connectionPill">
+              <span class="cdot"></span>
+              <span id="connectionPillText">Pi Offline</span>
+            </span>
+          </div>
+
+          <div class="notice-banner" id="noticeBanner" hidden></div>
+
+          <div class="cam-vp" id="cameraViewport">
+            <img class="cam-stream" id="remoteCamera" alt="Live Pi camera feed" hidden />
+            <div class="cam-ov" id="cameraOverlay">
+              <div class="reticle" id="guideReticle" hidden></div>
+              <div class="telemetry-strip">
+                <div>
+                  <span>Distance</span>
+                  <strong id="overlayDistance">0.00 m</strong>
+                </div>
+                <div>
+                  <span>Heading</span>
+                  <strong id="overlayHeading">0.00 rad</strong>
+                </div>
+                <div>
+                  <span>Drive</span>
+                  <strong id="overlayCommand">idle</strong>
+                </div>
+              </div>
+            </div>
+            <button type="button" class="camera-resize-handle" id="cameraResizeHandle" aria-label="Resize live camera vertically">
+              <span></span>
+              <span></span>
+              <span></span>
+            </button>
+          </div>
+
+          <div class="mtabs" role="tablist" aria-label="Cart modes">
+            <button class="mtab a" type="button" data-mode-tab="live">Live</button>
+            <button class="mtab" type="button" data-mode-tab="manual">Manual</button>
+          </div>
+
+          <section class="mode-panel active" data-mode-panel="live">
+            <div class="panel-card">
+              <div class="panel-head">
+                <div>
+                  <h3>Follow Person</h3>
+                  <p>
+                    Continuous camera stream plus automatic follow mode. Connect once and the live
+                    view starts on its own.
+                  </p>
+                </div>
+                <div class="panel-badge" id="followBadge">Ready</div>
+              </div>
+
+              <div class="control-grid">
+                <button type="button" class="abtn" id="engageFollowButton">Follow Person</button>
+                <button type="button" class="btn-o" id="holdPositionButton">Hold Position</button>
+                <button type="button" class="btn-o danger" id="captureFrameButton">Capture Frame</button>
+              </div>
+
+              <div class="target-gap-card">
+                <div>
+                  <div class="mini-label">Target Follow Distance</div>
+                  <div class="mini-value" id="targetGapDisplay">0.65 m</div>
+                </div>
+                <form id="gapForm" class="gap-form">
+                  <input
+                    id="gapInput"
+                    name="targetGap"
+                    type="number"
+                    min="0.3"
+                    max="2.5"
+                    step="0.05"
+                    value="0.65"
+                  />
+                  <button type="submit" class="btn-secondary">Apply</button>
+                </form>
+              </div>
+
+              <div class="live-metrics">
+                <article class="mini-card">
+                  <span class="mini-label">Left Motor</span>
+                  <strong class="mini-value" id="leftMotorValue">0.00</strong>
+                </article>
+                <article class="mini-card">
+                  <span class="mini-label">Right Motor</span>
+                  <strong class="mini-value" id="rightMotorValue">0.00</strong>
+                </article>
+                <article class="mini-card">
+                  <span class="mini-label">FPS</span>
+                  <strong class="mini-value" id="fpsValue">0.0</strong>
+                </article>
+              </div>
+
+              <div class="snapshot-card">
+                <div class="snapshot-top">
+                  <div>
+                    <div class="mini-label">Captured Frame</div>
+                    <p id="snapshotStatus">Take a still frame from the live camera for cloud vision or debugging.</p>
+                  </div>
+                </div>
+                <div class="snapshot-preview">
+                  <img id="snapshotPreview" alt="Snapshot from the live feed" hidden />
+                  <div id="snapshotPlaceholder">No frame captured yet</div>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <section class="mode-panel" data-mode-panel="manual">
+            <div class="panel-card">
+              <div class="panel-head">
+                <div>
+                  <h3>Manual Drive</h3>
+                  <p>Use the joystick and quick buttons to test steering, training ideas, and recovery.</p>
+                </div>
+                <div class="panel-badge" id="manualBadge">Standby</div>
+              </div>
+
+              <div class="manual-grid">
+                <div class="manual-joystick">
+                  <div class="joystick" id="joystick">
+                    <div class="joystick-ring"></div>
+                    <div class="joystick-axis horizontal"></div>
+                    <div class="joystick-axis vertical"></div>
+                    <div class="joystick-handle" id="joystickHandle"></div>
+                  </div>
+                  <div class="joystick-caption">
+                    <strong id="joystickReadout">L 0.00 / R 0.00</strong>
+                    <small>Drag to steer. Let go to send stop.</small>
+                  </div>
+                </div>
+
+                <div class="manual-actions">
+                  <button type="button" data-command="forward 0.4">Forward</button>
+                  <button type="button" data-command="left 0.35">Bias Left</button>
+                  <button type="button" data-command="right 0.35">Bias Right</button>
+                  <button type="button" data-command="reverse 0.3">Reverse</button>
+                  <button type="button" data-command="spin_left 0.35">Spin Left</button>
+                  <button type="button" data-command="spin_right 0.35">Spin Right</button>
+                  <button type="button" data-command="manual">Manual</button>
+                  <button type="button" data-command="stop">Stop</button>
+                  <button type="button" data-command="estop">Estop</button>
+                </div>
+              </div>
+
+              <div class="distance-card">
+                <div class="distance-head">
+                  <div>
+                    <h4>Distance Calibration</h4>
+                    <p>
+                      This is the future slot for person boxing, pose landmarks, and single-camera
+                      distance estimation.
+                    </p>
+                  </div>
+                  <button type="button" class="btn-secondary" id="measureDistanceButton">Calibrate Distance</button>
+                </div>
+                <div class="distance-metrics">
+                  <article class="mini-card">
+                    <span class="mini-label">Draft Distance</span>
+                    <strong class="mini-value" id="draftDistanceValue">0.00 m</strong>
+                  </article>
+                  <article class="mini-card">
+                    <span class="mini-label">Draft Heading</span>
+                    <strong class="mini-value" id="draftHeadingValue">0.00 rad</strong>
+                  </article>
+                  <article class="mini-card">
+                    <span class="mini-label">Draft Drive</span>
+                    <strong class="mini-value" id="draftDriveValue">stop</strong>
+                  </article>
+                </div>
+                <p class="distance-note" id="distanceNote">
+                  Press `Calibrate Distance` to arm the guide box. This is where MediaPipe-style pose
+                  or a person detector can plug into the cart later.
+                </p>
+              </div>
+            </div>
+          </section>
+
+          <section class="terminal-card">
+            <div class="terminal-head">
+              <div>
+                <h3>Terminal</h3>
+                <p>Direct commands to the Pi agent.</p>
+              </div>
+            </div>
+            <div class="terminal-log" id="terminalLog"></div>
+            <form id="terminalForm" class="terminal-form">
+              <input
+                id="terminalInput"
+                type="text"
+                autocomplete="off"
+                placeholder="auto, stop, gap 0.7, forward 0.4"
+              />
+              <button type="submit" class="btn-primary">Send</button>
+            </form>
+          </section>
+        </div>
+      </section>
+    </main>
+
+    <script src="/static/app.js" defer></script>
+  </body>
+</html>

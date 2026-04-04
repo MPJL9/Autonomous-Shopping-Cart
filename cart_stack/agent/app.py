@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 
 from cart_stack.agent.camera import build_camera_source
 from cart_stack.agent.motors import build_motor_driver
-from cart_stack.agent.vision import PersonVisionTracker, VisionEstimate
+from cart_stack.agent.vision import VisionEstimate, build_vision_tracker
 from cart_stack.shared.commands import execute_robot_command
 from cart_stack.shared.models import (
     DriveCommand,
@@ -65,7 +65,7 @@ class RobotAgentRuntime:
     def __init__(self) -> None:
         self.driver = build_motor_driver()
         self.camera = build_camera_source()
-        self.vision = PersonVisionTracker()
+        self.vision = build_vision_tracker()
         self._lock = asyncio.Lock()
         self._mode = "manual"
         self._estop = True

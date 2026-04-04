@@ -4,6 +4,7 @@ import math
 import os
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 try:
     import cv2  # type: ignore
@@ -22,6 +23,154 @@ class VisionEstimate:
     locked: bool
     distance_m: float | None = None
     heading_rad: float | None = None
+
+
+# ---------------------------------------------------------------------------
+# ArUco marker-based vision tracker
+# ---------------------------------------------------------------------------
+
+class ArUcoVisionTracker:
+    """Precise distance/heading estimation using ArUco markers and calibrated camera."""
+
+    def __init__(self) -> None:
+        self.enabled = cv2 is not None and np is not None
+
+        # Calibration file produced by aruco/calibration/calibrate_camera.py
+        calib_path = os.getenv("CART_ARUCO_CALIB_FILE", "calib.npz")
+        self._marker_length_m = float(os.getenv("CART_ARUCO_MARKER_SIZE_CM", "15")) / 100.0
+        dict_name = os.getenv("CART_ARUCO_DICT", "DICT_4X4_50")
+        self._target_marker_id: int | None = None
+        _id_env = os.getenv("CART_ARUCO_MARKER_ID", "")
+        if _id_env.strip():
+            self._target_marker_id = int(_id_env)
+
+        self._K: np.ndarray | None = None
+        self._dist_coeffs: np.ndarray | None = None
+        self._detector = None
+        self._last_distance: float | None = None
+        self._last_heading: float | None = None
+        self._smooth_alpha = 0.4
+
+        if not self.enabled:
+            return
+
+        # Load camera calibration
+        calib_file = Path(calib_path)
+        if calib_file.exists():
+            calib = np.load(str(calib_file))
+            self._K = calib["K"]
+            self._dist_coeffs = calib["dist"]
+        else:
+            # Fall back to approximate intrinsics from FOV (less accurate)
+            self._K = None
+            self._dist_coeffs = None
+
+        # ArUco detector
+        aruco_dict = cv2.aruco.getPredefinedDictionary(
+            getattr(cv2.aruco, dict_name)
+        )
+        self._detector = cv2.aruco.ArucoDetector(
+            aruco_dict, cv2.aruco.DetectorParameters()
+        )
+
+    def _estimate_intrinsics(self, w: int, h: int) -> tuple[np.ndarray, np.ndarray]:
+        """Approximate camera matrix from FOV when no calibration file is available."""
+        hfov = math.radians(float(os.getenv("CART_CAMERA_HORIZONTAL_FOV_DEG", "62.2")))
+        fx = (w / 2.0) / math.tan(hfov / 2.0)
+        fy = fx  # assume square pixels
+        K = np.array([[fx, 0, w / 2.0],
+                       [0, fy, h / 2.0],
+                       [0,  0,      1.0]], dtype=np.float64)
+        return K, np.zeros(5, dtype=np.float64)
+
+    def _choose_marker(self, ids, corners) -> int | None:
+        """Pick the best marker. If a target ID is set, prefer it; otherwise pick largest."""
+        if ids is None or len(ids) == 0:
+            return None
+        flat_ids = ids.flatten()
+        if self._target_marker_id is not None and self._target_marker_id in flat_ids:
+            return int(np.where(flat_ids == self._target_marker_id)[0][0])
+        # Pick the marker with the largest bounding area
+        best_idx = 0
+        best_area = 0.0
+        for i, pts in enumerate(corners):
+            p = pts[0]
+            w = np.linalg.norm(p[1] - p[0])
+            h = np.linalg.norm(p[2] - p[1])
+            area = w * h
+            if area > best_area:
+                best_area = area
+                best_idx = i
+        return best_idx
+
+    def _draw_overlay(self, frame, corners, idx: int, distance_m: float, heading_rad: float) -> None:
+        pts = corners[idx][0].astype(int)
+        for j in range(4):
+            cv2.line(frame, tuple(pts[j]), tuple(pts[(j + 1) % 4]), (0, 255, 0), 2)
+        cx, cy = int(pts[:, 0].mean()), int(pts[:, 1].mean())
+        cv2.circle(frame, (cx, cy), 5, (0, 0, 255), -1)
+        label = f"ArUco {distance_m:.2f}m | {heading_rad:+.2f}rad"
+        cv2.putText(frame, label, (cx - 80, cy - 20),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+
+    def annotate(self, jpeg_bytes: bytes) -> VisionEstimate:
+        if not self.enabled or cv2 is None or np is None or self._detector is None:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        frame = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        h, w = frame.shape[:2]
+        K = self._K
+        dist_coeffs = self._dist_coeffs
+        if K is None:
+            K, dist_coeffs = self._estimate_intrinsics(w, h)
+
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        corners, ids, _ = self._detector.detectMarkers(gray)
+
+        idx = self._choose_marker(ids, corners)
+        if idx is None:
+            self._last_distance = None
+            self._last_heading = None
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        # Pose estimation
+        rvecs, tvecs, _ = cv2.aruco.estimatePoseSingleMarkers(
+            [corners[idx]], self._marker_length_m, K, dist_coeffs
+        )
+        tvec = tvecs[0][0]  # [x, y, z] in camera frame (meters)
+        distance_m = float(np.linalg.norm(tvec))
+        heading_rad = float(math.atan2(tvec[0], tvec[2]))  # x/z = horizontal angle
+
+        # Smooth readings
+        if self._last_distance is not None:
+            a = self._smooth_alpha
+            distance_m = self._last_distance * (1 - a) + distance_m * a
+            heading_rad = self._last_heading * (1 - a) + heading_rad * a
+        self._last_distance = distance_m
+        self._last_heading = heading_rad
+
+        self._draw_overlay(frame, corners, idx, distance_m, heading_rad)
+        success, encoded = cv2.imencode(".jpg", frame)
+        if not success:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        return VisionEstimate(
+            frame_jpeg=encoded.tobytes(),
+            locked=True,
+            distance_m=distance_m,
+            heading_rad=heading_rad,
+        )
+
+
+def build_vision_tracker() -> ArUcoVisionTracker | PersonVisionTracker:
+    """Factory: select tracker based on CART_VISION_MODE env var."""
+    mode = os.getenv("CART_VISION_MODE", "hog").lower()
+    if mode == "aruco":
+        return ArUcoVisionTracker()
+    return PersonVisionTracker()
 
 
 class PersonVisionTracker:

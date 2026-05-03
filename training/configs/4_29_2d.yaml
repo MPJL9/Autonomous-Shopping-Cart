@@ -1,0 +1,25 @@
+# 2D BC policy on 4/29 manual sessions.
+# Same recipe as 4_27_2d_mirror but on the new dataset:
+# block-cap stops + active runs, plus horizontal-mirror augmentation.
+action_dim: 2
+obs_dim: 4
+hidden_sizes: [64, 64]
+activation: tanh
+
+data_glob: "training/data/processed/4-29/*.npz"
+
+stop_max_per_run: 2
+action_max_per_run: 5
+stop_threshold: 0.04
+mirror_augment: true
+
+out_dir: "training/runs/4_29_2d"
+checkpoint_name: "bc.pt"
+
+seed: 0
+batch_size: 128
+lr: 0.001
+epochs: 300
+val_frac: 0.15
+device: auto
+save_every: 30

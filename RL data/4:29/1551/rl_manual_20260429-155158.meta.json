@@ -1,0 +1,13 @@
+{
+  "session_id": "2026-04-29T19-51-58",
+  "browser_started_at_ms": 1777492318364,
+  "browser_started_at_iso": "2026-04-29T19:51:58.364Z",
+  "policy": "manual",
+  "max_steps": 300,
+  "step_hz": 5,
+  "action_scale": 0.8,
+  "video_filename": "rl_manual_20260429-155158.webm",
+  "video_duration_sec": 60.45469999999995,
+  "log_filename": "rl_manual_20260429-155158.jsonl",
+  "alignment_notes": "To align video to JSONL: the video frame at t=0s corresponds to browser_started_at_iso. The JSONL header 'started_at' is the Pi wall-clock at session start; use (pi_started_at_ms - browser_started_at_ms) as the clock offset. Round-trip latency (~20-100ms LAN) is the residual error."
+}

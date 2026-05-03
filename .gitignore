@@ -7,3 +7,11 @@ __pycache__/
 cart.config
 *.egg-info/
 pi-deploy.tar.gz
+
+# Local-only training artifacts
+rl_output/
+*.bak
+*.broken_overlay.npz
+
+# Notebook checkpoints
+.ipynb_checkpoints/

@@ -1,0 +1,25 @@
+# 2D BC on 4/29 manual sessions ONLY, blockcap on, NO mirror augmentation.
+# This is the historical "bc_2d" slot recipe. Pair with 4_29_2d.yaml (which
+# adds mirror_augment=true) for the historical "bc_2d_mirror" slot.
+action_dim: 2
+obs_dim: 4
+hidden_sizes: [64, 64]
+activation: tanh
+
+data_glob: "training/data/processed/4-29/*.npz"
+
+stop_max_per_run: 2
+action_max_per_run: 5
+stop_threshold: 0.04
+mirror_augment: false
+
+out_dir: "training/runs/4_29_2d_no_mirror"
+checkpoint_name: "bc.pt"
+
+seed: 0
+batch_size: 128
+lr: 0.001
+epochs: 300
+val_frac: 0.15
+device: auto
+save_every: 30

@@ -7,11 +7,34 @@ const state = {
   joystickActive: false,
   lastDriveSentAt: 0,
   activeMode: "live",
+  activeView: "live",
   cameraHeightPx: 360,
   resizingCamera: false,
   autoConnectAttempted: false,
   autoReconnectEnabled: true,
   lastReconnectAttemptAt: 0,
+  recording: false,
+  recordingOwner: null, // "standalone" | "rl" | null
+  bundledAutoInstallTried: false,
+  mediaRecorder: null,
+  recordedChunks: [],
+  recordingCanvas: null,
+  recordingInterval: null,
+  recordingStartedAt: 0,
+  recordingFrameCount: 0,
+  recordingTimer: null,
+  rlBundle: {
+    active: false,
+    sessionId: null,
+    browserStartedAtMs: null,
+    browserStartedAtIso: null,
+    policy: null,
+    maxSteps: 0,
+    stepHz: 0,
+    actionScale: 0,
+    videoBlob: null,
+    videoDurationSec: 0,
+  },
 };
 
 const els = {
@@ -27,8 +50,10 @@ const els = {
   deviceCamera: document.getElementById("deviceCamera"),
   deviceMode: document.getElementById("deviceMode"),
   deviceIp: document.getElementById("deviceIp"),
-  deviceLeftPin: document.getElementById("deviceLeftPin"),
-  deviceRightPin: document.getElementById("deviceRightPin"),
+  deviceLeft1Pin: document.getElementById("deviceLeft1Pin"),
+  deviceLeft2Pin: document.getElementById("deviceLeft2Pin"),
+  deviceRight1Pin: document.getElementById("deviceRight1Pin"),
+  deviceRight2Pin: document.getElementById("deviceRight2Pin"),
   sessionLastCommand: document.getElementById("sessionLastCommand"),
   sessionDistance: document.getElementById("sessionDistance"),
   sessionGap: document.getElementById("sessionGap"),
@@ -43,12 +68,50 @@ const els = {
   overlayHeading: document.getElementById("overlayHeading"),
   overlayCommand: document.getElementById("overlayCommand"),
   pinForm: document.getElementById("pinForm"),
-  leftPinInput: document.getElementById("leftPinInput"),
-  rightPinInput: document.getElementById("rightPinInput"),
+  left1PinInput: document.getElementById("left1PinInput"),
+  left2PinInput: document.getElementById("left2PinInput"),
+  right1PinInput: document.getElementById("right1PinInput"),
+  right2PinInput: document.getElementById("right2PinInput"),
+  invertForm: document.getElementById("invertForm"),
+  left1InvertInput: document.getElementById("left1InvertInput"),
+  left2InvertInput: document.getElementById("left2InvertInput"),
+  right1InvertInput: document.getElementById("right1InvertInput"),
+  right2InvertInput: document.getElementById("right2InvertInput"),
   trimForm: document.getElementById("trimForm"),
-  leftTrimInput: document.getElementById("leftTrimInput"),
-  rightTrimInput: document.getElementById("rightTrimInput"),
+  left1TrimInput: document.getElementById("left1TrimInput"),
+  left2TrimInput: document.getElementById("left2TrimInput"),
+  right1TrimInput: document.getElementById("right1TrimInput"),
+  right2TrimInput: document.getElementById("right2TrimInput"),
   deadbandInput: document.getElementById("deadbandInput"),
+  viewTabs: [...document.querySelectorAll("[data-view-tab]")],
+  viewPanels: [...document.querySelectorAll("[data-view-panel]")],
+  recordStartButton: document.getElementById("recordStartButton"),
+  recordStopButton: document.getElementById("recordStopButton"),
+  recordBadge: document.getElementById("recordBadge"),
+  recordDuration: document.getElementById("recordDuration"),
+  recordFrames: document.getElementById("recordFrames"),
+  recordStatusValue: document.getElementById("recordStatusValue"),
+  rlForm: document.getElementById("rlForm"),
+  rlPolicyInput: document.getElementById("rlPolicyInput"),
+  rlMaxStepsInput: document.getElementById("rlMaxStepsInput"),
+  rlStepHzInput: document.getElementById("rlStepHzInput"),
+  rlActionScaleInput: document.getElementById("rlActionScaleInput"),
+  rlStartButton: document.getElementById("rlStartButton"),
+  rlStopButton: document.getElementById("rlStopButton"),
+  rlDownloadLogButton: document.getElementById("rlDownloadLogButton"),
+  rlUploadPolicyButton: document.getElementById("rlUploadPolicyButton"),
+  rlPolicyFileInput: document.getElementById("rlPolicyFileInput"),
+  rlInstallBundledButton: document.getElementById("rlInstallBundledButton"),
+  rlPolicyCombinedInfo: document.getElementById("rlPolicyCombinedInfo"),
+  rlPolicy51OnlyInfo: document.getElementById("rlPolicy51OnlyInfo"),
+  rlPolicyPreFixInfo: document.getElementById("rlPolicyPreFixInfo"),
+  rlPolicy4_29Info: document.getElementById("rlPolicy4_29Info"),
+  rlPolicy4_29MirrorInfo: document.getElementById("rlPolicy4_29MirrorInfo"),
+  rlPolicyAwrInfo: document.getElementById("rlPolicyAwrInfo"),
+  rlBadge: document.getElementById("rlBadge"),
+  rlStepValue: document.getElementById("rlStepValue"),
+  rlRewardValue: document.getElementById("rlRewardValue"),
+  rlPolicyValue: document.getElementById("rlPolicyValue"),
   leftMotorValue: document.getElementById("leftMotorValue"),
   rightMotorValue: document.getElementById("rightMotorValue"),
   fpsValue: document.getElementById("fpsValue"),
@@ -60,6 +123,7 @@ const els = {
   engageFollowButton: document.getElementById("engageFollowButton"),
   holdPositionButton: document.getElementById("holdPositionButton"),
   captureFrameButton: document.getElementById("captureFrameButton"),
+  recordButton: document.getElementById("recordButton"),
   measureDistanceButton: document.getElementById("measureDistanceButton"),
   draftDistanceValue: document.getElementById("draftDistanceValue"),
   draftHeadingValue: document.getElementById("draftHeadingValue"),
@@ -73,6 +137,9 @@ const els = {
   joystick: document.getElementById("joystick"),
   joystickHandle: document.getElementById("joystickHandle"),
   joystickReadout: document.getElementById("joystickReadout"),
+  rlJoystick: document.getElementById("rlJoystick"),
+  rlJoystickHandle: document.getElementById("rlJoystickHandle"),
+  rlJoystickReadout: document.getElementById("rlJoystickReadout"),
   terminalLog: document.getElementById("terminalLog"),
   terminalForm: document.getElementById("terminalForm"),
   terminalInput: document.getElementById("terminalInput"),
@@ -160,8 +227,37 @@ function setCameraHeight(heightPx) {
 }
 
 function syncInputValue(input, value) {
+  if (!input) return;
   if (document.activeElement !== input) {
     input.value = value;
+  }
+}
+
+function syncCheckbox(input, value) {
+  if (!input) return;
+  if (document.activeElement !== input) {
+    input.checked = Boolean(value);
+  }
+}
+
+function updateRlStatus(robot) {
+  if (!els.rlStepValue) return;
+  const running = Boolean(robot.rl_running);
+  els.rlBadge.textContent = running ? "Running" : "Idle";
+  els.rlStepValue.textContent = `${robot.rl_step || 0} / ${robot.rl_max_steps || 0}`;
+  els.rlRewardValue.textContent = Number(robot.rl_total_reward || 0).toFixed(2);
+  els.rlPolicyValue.textContent = robot.rl_policy || "idle";
+
+  // Vision-mode readout, if the element exists in the DOM.
+  const _visionReadout = document.getElementById("visionModeReadout");
+  if (_visionReadout) {
+    _visionReadout.textContent = `mode: ${robot.vision_mode || "aruco"}`;
+  }
+  els.rlStartButton.disabled = running;
+  els.rlStopButton.disabled = !running;
+  // Pi auto-ended the session (hit max_steps, or errored) while we were recording — flush the video.
+  if (state.rlBundle.active && !running) {
+    finalizeRlRecording();
   }
 }
 
@@ -268,13 +364,24 @@ function renderStatus(status) {
     els.deviceMode.textContent = "Manual";
   }
   els.deviceIp.textContent = targetLabel;
-  els.deviceLeftPin.textContent = String(robot.left_motor_pin);
-  els.deviceRightPin.textContent = String(robot.right_motor_pin);
-  syncInputValue(els.leftPinInput, String(robot.left_motor_pin));
-  syncInputValue(els.rightPinInput, String(robot.right_motor_pin));
-  syncInputValue(els.leftTrimInput, robot.left_trim.toFixed(2));
-  syncInputValue(els.rightTrimInput, robot.right_trim.toFixed(2));
-  syncInputValue(els.deadbandInput, robot.stop_deadband.toFixed(2));
+  els.deviceLeft1Pin.textContent = String(robot.left1_motor_pin);
+  els.deviceLeft2Pin.textContent = String(robot.left2_motor_pin);
+  els.deviceRight1Pin.textContent = String(robot.right1_motor_pin);
+  els.deviceRight2Pin.textContent = String(robot.right2_motor_pin);
+  syncInputValue(els.left1PinInput, String(robot.left1_motor_pin));
+  syncInputValue(els.left2PinInput, String(robot.left2_motor_pin));
+  syncInputValue(els.right1PinInput, String(robot.right1_motor_pin));
+  syncInputValue(els.right2PinInput, String(robot.right2_motor_pin));
+  syncCheckbox(els.left1InvertInput, Boolean(robot.left1_invert));
+  syncCheckbox(els.left2InvertInput, Boolean(robot.left2_invert));
+  syncCheckbox(els.right1InvertInput, Boolean(robot.right1_invert));
+  syncCheckbox(els.right2InvertInput, Boolean(robot.right2_invert));
+  syncInputValue(els.left1TrimInput, Number(robot.left1_trim).toFixed(2));
+  syncInputValue(els.left2TrimInput, Number(robot.left2_trim).toFixed(2));
+  syncInputValue(els.right1TrimInput, Number(robot.right1_trim).toFixed(2));
+  syncInputValue(els.right2TrimInput, Number(robot.right2_trim).toFixed(2));
+  syncInputValue(els.deadbandInput, Number(robot.stop_deadband).toFixed(2));
+  updateRlStatus(robot);
   els.sessionLastCommand.textContent = robot.last_command;
   els.sessionDistance.textContent = `${robot.distance_m.toFixed(2)} m`;
   els.sessionGap.textContent = `${robot.target_gap_m.toFixed(2)} m`;
@@ -323,6 +430,31 @@ async function connect(target) {
   state.autoReconnectEnabled = true;
   saveTarget(trimmed);
   renderStatus(payload.status);
+  // Auto-install bundled policies once the Pi is reachable, but only if
+  // neither slot is filled already — don't trample a user-uploaded checkpoint.
+  autoInstallBundledIfEmpty().catch(() => {});
+}
+
+async function autoInstallBundledIfEmpty() {
+  if (state.bundledAutoInstallTried) return;
+  state.bundledAutoInstallTried = true;
+  try {
+    const info = await request("/api/rl/policy/info");
+    const allFilled = [
+      "bc_2d_combined_v2", "bc_2d_5_1only_v2",
+      "bc_2d_combined_pre_fix", "bc_2d", "bc_2d_mirror",
+      "bc_2d_awr",
+    ].every((s) => info?.[s]?.installed);
+    if (allFilled) {
+      // All slots already filled (probably persisted from a previous session
+      // on the Pi); leave them alone.
+      return;
+    }
+    await request("/api/rl/policy/install-builtin?name=all", { method: "POST" });
+    await refreshRlPolicyInfo();
+  } catch (_) {
+    // Auto-install is best-effort; surface failures only via the manual button.
+  }
 }
 
 async function disconnect() {
@@ -341,9 +473,14 @@ async function sendCommand(command) {
   renderStatus(payload.status);
 }
 
+function _joystickReadouts() {
+  return [els.joystickReadout, els.rlJoystickReadout].filter(Boolean);
+}
+
 async function sendDrive(left, right) {
   const now = performance.now();
-  els.joystickReadout.textContent = `L ${left.toFixed(2)} / R ${right.toFixed(2)}`;
+  const text = `L ${left.toFixed(2)} / R ${right.toFixed(2)}`;
+  _joystickReadouts().forEach((el) => (el.textContent = text));
   if (state.joystickActive && now - state.lastDriveSentAt < 100) {
     return;
   }
@@ -358,7 +495,7 @@ async function sendDrive(left, right) {
 
 async function sendStop() {
   renderStatus(await request("/api/stop", { method: "POST" }));
-  els.joystickReadout.textContent = "L 0.00 / R 0.00";
+  _joystickReadouts().forEach((el) => (el.textContent = "L 0.00 / R 0.00"));
 }
 
 function captureCurrentFrame() {
@@ -441,28 +578,436 @@ function setupConnection() {
 function setupPinControls() {
   els.pinForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const leftPin = Number(els.leftPinInput.value);
-    const rightPin = Number(els.rightPinInput.value);
-    if (!Number.isInteger(leftPin) || !Number.isInteger(rightPin)) {
-      showNotice("Enter whole BCM GPIO pin numbers for the left and right motor channels.");
+    const pins = [
+      Number(els.left1PinInput.value),
+      Number(els.left2PinInput.value),
+      Number(els.right1PinInput.value),
+      Number(els.right2PinInput.value),
+    ];
+    if (pins.some((v) => !Number.isInteger(v) || v < 0 || v > 27)) {
+      showNotice("Enter whole BCM GPIO pin numbers (0-27) for all four wheels.");
       return;
     }
-    await sendCommand(`pins ${leftPin} ${rightPin}`).catch((error) => showNotice(friendlyErrorMessage(error)));
+    await sendCommand(`pins ${pins.join(" ")}`).catch((error) => showNotice(friendlyErrorMessage(error)));
+  });
+
+  els.invertForm.addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const payload = {
+      left1_invert: els.left1InvertInput.checked,
+      left2_invert: els.left2InvertInput.checked,
+      right1_invert: els.right1InvertInput.checked,
+      right2_invert: els.right2InvertInput.checked,
+    };
+    try {
+      const result = await request("/api/motor-inverts", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+      renderStatus(result);
+    } catch (error) {
+      showNotice(friendlyErrorMessage(error));
+    }
   });
 
   els.trimForm.addEventListener("submit", async (event) => {
     event.preventDefault();
-    const leftTrim = Number(els.leftTrimInput.value);
-    const rightTrim = Number(els.rightTrimInput.value);
+    const trims = [
+      Number(els.left1TrimInput.value),
+      Number(els.left2TrimInput.value),
+      Number(els.right1TrimInput.value),
+      Number(els.right2TrimInput.value),
+    ];
     const deadband = Number(els.deadbandInput.value);
-    if ([leftTrim, rightTrim, deadband].some((value) => Number.isNaN(value))) {
+    if ([...trims, deadband].some((v) => Number.isNaN(v))) {
       showNotice("Enter valid trim values before applying servo calibration.");
       return;
     }
-    await sendCommand(`trim ${leftTrim} ${rightTrim} ${deadband}`).catch((error) =>
+    await sendCommand(`trim ${trims.join(" ")} ${deadband}`).catch((error) =>
       showNotice(friendlyErrorMessage(error)),
     );
   });
+}
+
+function setupViewTabs() {
+  const setView = (name) => {
+    state.activeView = name;
+    els.viewTabs.forEach((btn) => btn.classList.toggle("active", btn.dataset.viewTab === name));
+    els.viewPanels.forEach((panel) => panel.classList.toggle("active", panel.dataset.viewPanel === name));
+  };
+  els.viewTabs.forEach((btn) => {
+    btn.addEventListener("click", () => setView(btn.dataset.viewTab));
+  });
+  setView("live");
+}
+
+function setupRecordControls() {
+  if (!els.recordStartButton) return;
+  els.recordStartButton.addEventListener("click", () => startStandaloneRecording());
+  els.recordStopButton.addEventListener("click", () => stopStandaloneRecording());
+}
+
+function beginCanvasRecording(owner, onComplete) {
+  if (state.recording) {
+    showNotice(
+      state.recordingOwner === "rl"
+        ? "An RL session recording is in progress. Stop it first."
+        : "A recording is already in progress.",
+    );
+    return false;
+  }
+  if (els.remoteCamera.hidden || !els.remoteCamera.complete || !els.remoteCamera.naturalWidth) {
+    showNotice("The live camera frame is not ready yet. Connect to the Pi first.");
+    return false;
+  }
+  const canvas = document.createElement("canvas");
+  canvas.width = els.remoteCamera.naturalWidth;
+  canvas.height = els.remoteCamera.naturalHeight;
+  const ctx = canvas.getContext("2d");
+  state.recordingCanvas = canvas;
+  state.recordedChunks = [];
+  state.recordingFrameCount = 0;
+  state.recordingStartedAt = performance.now();
+
+  const stream = canvas.captureStream(15);
+  let recorder;
+  try {
+    recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+  } catch (err) {
+    showNotice("This browser does not support WebM recording. Try Chrome or Firefox.");
+    return false;
+  }
+  recorder.ondataavailable = (event) => {
+    if (event.data.size > 0) state.recordedChunks.push(event.data);
+  };
+  recorder.onstop = () => {
+    const blob = new Blob(state.recordedChunks, { type: "video/webm" });
+    const durationSec = (performance.now() - state.recordingStartedAt) / 1000;
+    if (typeof onComplete === "function") {
+      onComplete(blob, durationSec);
+    }
+  };
+
+  state.recordingInterval = window.setInterval(() => {
+    if (els.remoteCamera.complete && els.remoteCamera.naturalWidth) {
+      ctx.drawImage(els.remoteCamera, 0, 0, canvas.width, canvas.height);
+      state.recordingFrameCount += 1;
+      if (els.recordFrames) els.recordFrames.textContent = String(state.recordingFrameCount);
+    }
+  }, 66);
+
+  state.recordingTimer = window.setInterval(() => {
+    const seconds = Math.floor((performance.now() - state.recordingStartedAt) / 1000);
+    const mm = String(Math.floor(seconds / 60)).padStart(2, "0");
+    const ss = String(seconds % 60).padStart(2, "0");
+    if (els.recordDuration) els.recordDuration.textContent = `${mm}:${ss}`;
+  }, 500);
+
+  recorder.start(500);
+  state.mediaRecorder = recorder;
+  state.recording = true;
+  state.recordingOwner = owner;
+  return true;
+}
+
+function stopCanvasRecording() {
+  if (!state.recording) return;
+  if (state.recordingInterval) {
+    window.clearInterval(state.recordingInterval);
+    state.recordingInterval = null;
+  }
+  if (state.recordingTimer) {
+    window.clearInterval(state.recordingTimer);
+    state.recordingTimer = null;
+  }
+  if (state.mediaRecorder && state.mediaRecorder.state !== "inactive") {
+    state.mediaRecorder.stop();
+  }
+  state.mediaRecorder = null;
+  state.recordingCanvas = null;
+  state.recording = false;
+  state.recordingOwner = null;
+}
+
+function startStandaloneRecording() {
+  const ok = beginCanvasRecording("standalone", (blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    const timestamp = new Date().toISOString().replace(/[:.]/g, "-").slice(0, 19);
+    a.href = url;
+    a.download = `cart-recording-${timestamp}.webm`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+  if (!ok) return;
+  els.recordBadge.textContent = "Recording";
+  els.recordStatusValue.textContent = "recording";
+  els.recordStartButton.disabled = true;
+  els.recordStopButton.disabled = false;
+}
+
+function stopStandaloneRecording() {
+  if (!state.recording || state.recordingOwner !== "standalone") return;
+  stopCanvasRecording();
+  els.recordBadge.textContent = "Idle";
+  els.recordStatusValue.textContent = "saved";
+  els.recordStartButton.disabled = false;
+  els.recordStopButton.disabled = true;
+}
+
+function setupRlControls() {
+  if (!els.rlForm) return;
+  els.rlForm.addEventListener("submit", handleRlStart);
+  els.rlStopButton.addEventListener("click", handleRlStop);
+  els.rlDownloadLogButton.addEventListener("click", handleRlDownloadBundle);
+  if (els.rlUploadPolicyButton && els.rlPolicyFileInput) {
+    els.rlUploadPolicyButton.addEventListener("click", () => els.rlPolicyFileInput.click());
+    els.rlPolicyFileInput.addEventListener("change", handleRlPolicyUpload);
+  }
+  if (els.rlInstallBundledButton) {
+    els.rlInstallBundledButton.addEventListener("click", handleRlInstallBundled);
+  }
+  refreshRlPolicyInfo().catch(() => {});
+}
+
+async function handleRlInstallBundled() {
+  const btn = els.rlInstallBundledButton;
+  if (btn) { btn.disabled = true; btn.textContent = "Installing..."; }
+  try {
+    const result = await request("/api/rl/policy/install-builtin?name=all", {
+      method: "POST",
+    });
+    const lines = (result.installed || []).map((r) =>
+      r.ok
+        ? `${r.file} → ${r.slot} (${(r.size_bytes / 1024).toFixed(1)} KB)`
+        : `${r.file} FAILED: ${r.error}`,
+    );
+    showNotice(`Installed ${result.installed.length} policy file(s):\n${lines.join("\n")}`);
+    await refreshRlPolicyInfo();
+  } catch (error) {
+    showNotice(friendlyErrorMessage(error));
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = "Install Bundled Policies (6 slots)"; }
+  }
+}
+
+function _renderSlot(el, info) {
+  if (!el) return;
+  if (!info || !info.installed) {
+    el.textContent = "not installed";
+    el.style.color = "#888";
+    return;
+  }
+  const kb = (info.size_bytes / 1024).toFixed(1);
+  el.textContent = `${kb} KB · ${info.modified_at.slice(11, 19)}`;
+  el.style.color = "";
+}
+
+async function refreshRlPolicyInfo() {
+  const slotEls = [
+    els.rlPolicyCombinedInfo, els.rlPolicy51OnlyInfo,
+    els.rlPolicyPreFixInfo, els.rlPolicy4_29Info, els.rlPolicy4_29MirrorInfo,
+    els.rlPolicyAwrInfo,
+  ];
+  if (slotEls.every((e) => !e)) return;
+  try {
+    const info = await request("/api/rl/policy/info");
+    _renderSlot(els.rlPolicyCombinedInfo,   info.bc_2d_combined_v2);
+    _renderSlot(els.rlPolicy51OnlyInfo,     info.bc_2d_5_1only_v2);
+    _renderSlot(els.rlPolicyPreFixInfo,     info.bc_2d_combined_pre_fix);
+    _renderSlot(els.rlPolicy4_29Info,       info.bc_2d);
+    _renderSlot(els.rlPolicy4_29MirrorInfo, info.bc_2d_mirror);
+    _renderSlot(els.rlPolicyAwrInfo,        info.bc_2d_awr);
+  } catch (_) {
+    slotEls.forEach((el) => {
+      if (el) {
+        el.textContent = "(connect Pi)";
+        el.style.color = "#888";
+      }
+    });
+  }
+}
+
+async function handleRlPolicyUpload(event) {
+  const file = event.target.files && event.target.files[0];
+  if (!file) return;
+  try {
+    const buf = await file.arrayBuffer();
+    const response = await fetch("/api/rl/policy/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/octet-stream" },
+      body: buf,
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      throw new Error(payload.detail || `Upload failed (HTTP ${response.status})`);
+    }
+    const slot = payload.slot || "?";
+    const kb = (payload.size_bytes / 1024).toFixed(1);
+    showNotice(`Policy uploaded to ${slot} slot: ${kb} KB`);
+    await refreshRlPolicyInfo();
+  } catch (error) {
+    showNotice(friendlyErrorMessage(error));
+  } finally {
+    event.target.value = "";  // allow re-uploading the same filename
+  }
+}
+
+async function handleRlStart(event) {
+  event.preventDefault();
+  if (state.recording && state.recordingOwner !== "rl") {
+    showNotice("A standalone recording is running. Stop it before starting an RL session.");
+    return;
+  }
+
+  const policy = els.rlPolicyInput.value;
+  const maxSteps = Number(els.rlMaxStepsInput.value);
+  const stepHz = Number(els.rlStepHzInput.value);
+  const actionScale = Number(els.rlActionScaleInput.value);
+
+  const browserStartedAtMs = Date.now();
+  const browserStartedAtIso = new Date(browserStartedAtMs).toISOString();
+  const sessionId = browserStartedAtIso.replace(/[:.]/g, "-").slice(0, 19);
+
+  const recStarted = beginCanvasRecording("rl", (blob, durationSec) => {
+    // Only save if this completion belongs to the *current* session. On start
+    // failure we null out sessionId, so the late onStop callback is ignored.
+    if (state.rlBundle.sessionId !== sessionId) return;
+    state.rlBundle.videoBlob = blob;
+    state.rlBundle.videoDurationSec = durationSec;
+  });
+  if (!recStarted) {
+    return; // beginCanvasRecording already surfaced the reason
+  }
+
+  state.rlBundle = {
+    active: true,
+    sessionId,
+    browserStartedAtMs,
+    browserStartedAtIso,
+    policy,
+    maxSteps,
+    stepHz,
+    actionScale,
+    videoBlob: null,
+    videoDurationSec: 0,
+  };
+
+  try {
+    const result = await request("/api/rl/start", {
+      method: "POST",
+      body: JSON.stringify({
+        policy,
+        max_steps: maxSteps,
+        step_hz: stepHz,
+        action_scale: actionScale,
+      }),
+    });
+    renderStatus(result);
+  } catch (error) {
+    // Pi rejected the start: orphan the sessionId so the recorder's onStop
+    // callback won't write to rlBundle, then tear down.
+    state.rlBundle.sessionId = null;
+    state.rlBundle.active = false;
+    stopCanvasRecording();
+    showNotice(friendlyErrorMessage(error));
+    return;
+  }
+
+  els.recordBadge.textContent = "Recording (RL)";
+  els.recordStatusValue.textContent = "recording (rl)";
+  els.recordStartButton.disabled = true;
+  els.recordStopButton.disabled = true; // standalone stop must not stop an RL recording
+}
+
+async function handleRlStop() {
+  try {
+    const result = await request("/api/rl/stop", { method: "POST" });
+    renderStatus(result);
+  } catch (error) {
+    showNotice(friendlyErrorMessage(error));
+    // Keep the recording running; the user can retry stop.
+    return;
+  }
+  finalizeRlRecording();
+}
+
+function finalizeRlRecording() {
+  if (!state.rlBundle.active) return;
+  state.rlBundle.active = false;
+  if (state.recording && state.recordingOwner === "rl") {
+    stopCanvasRecording();
+  }
+  els.recordBadge.textContent = "Idle";
+  els.recordStatusValue.textContent = "saved";
+  els.recordStartButton.disabled = false;
+  els.recordStopButton.disabled = true;
+}
+
+async function handleRlDownloadBundle() {
+  // 1. Fetch the JSONL from the Pi.
+  let logBlob = null;
+  let logFilename = null;
+  try {
+    const response = await fetch("/api/rl/log");
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.detail || `Log download failed (HTTP ${response.status})`);
+    }
+    const disposition = response.headers.get("content-disposition") || "";
+    const match = disposition.match(/filename="?([^";]+)"?/);
+    logFilename = match ? match[1] : "rl_session.jsonl";
+    logBlob = await response.blob();
+  } catch (error) {
+    showNotice(friendlyErrorMessage(error));
+  }
+
+  // Use the Pi's log filename as the stem so all three files share a name.
+  const stem = (logFilename || `rl_session_${state.rlBundle.sessionId || Date.now()}`).replace(/\.jsonl$/, "");
+  const videoFilename = `${stem}.webm`;
+  const metaFilename = `${stem}.meta.json`;
+
+  // 2. Build the meta sidecar.
+  const meta = {
+    session_id: state.rlBundle.sessionId,
+    browser_started_at_ms: state.rlBundle.browserStartedAtMs,
+    browser_started_at_iso: state.rlBundle.browserStartedAtIso,
+    policy: state.rlBundle.policy,
+    max_steps: state.rlBundle.maxSteps,
+    step_hz: state.rlBundle.stepHz,
+    action_scale: state.rlBundle.actionScale,
+    video_filename: state.rlBundle.videoBlob ? videoFilename : null,
+    video_duration_sec: state.rlBundle.videoDurationSec || null,
+    log_filename: logFilename,
+    alignment_notes:
+      "To align video to JSONL: the video frame at t=0s corresponds to browser_started_at_iso. " +
+      "The JSONL header 'started_at' is the Pi wall-clock at session start; use " +
+      "(pi_started_at_ms - browser_started_at_ms) as the clock offset. " +
+      "Round-trip latency (~20-100ms LAN) is the residual error.",
+  };
+  const metaBlob = new Blob([JSON.stringify(meta, null, 2)], { type: "application/json" });
+
+  // 3. Sequential download (brief spacing so Chrome's multi-download prompt fires once).
+  const downloads = [];
+  if (logBlob) downloads.push([logBlob, logFilename]);
+  if (state.rlBundle.videoBlob) downloads.push([state.rlBundle.videoBlob, videoFilename]);
+  downloads.push([metaBlob, metaFilename]);
+
+  for (const [blob, filename] of downloads) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    await new Promise((r) => setTimeout(r, 150));
+  }
+
+  if (!state.rlBundle.videoBlob) {
+    showNotice("No RL video cached (page may have refreshed). Downloaded log + meta only.");
+  }
 }
 
 function setupLiveControls() {
@@ -476,6 +1021,11 @@ function setupLiveControls() {
   });
 
   els.captureFrameButton.addEventListener("click", captureCurrentFrame);
+  // The in-Live "Record" button just jumps to the Record tab; actual recording lives there.
+  els.recordButton.addEventListener("click", () => {
+    const recordTab = els.viewTabs.find((btn) => btn.dataset.viewTab === "record");
+    if (recordTab) recordTab.click();
+  });
 
   els.measureDistanceButton.addEventListener("click", async () => {
     const command = state.status?.robot?.vision_enabled ? "clear_calibration" : "calibrate_distance";
@@ -514,13 +1064,60 @@ function setupTerminal() {
   });
 }
 
-function setupJoystick() {
+// Keyboard teleop:
+//   w  -> forward 0.4   (hold = drive, release = stop)
+//   s  -> reverse 0.4
+//   a  -> spin_left 0.15
+//   d  -> spin_right 0.15
+//   space -> stop  (one-shot, does not auto-undo on keyup)
+//
+// Routes through sendCommand exactly like the dashboard buttons, so motor
+// state, recording, and command parsing all behave identically.
+const _KEY_TO_COMMAND = {
+  w: "forward 0.4",
+  s: "reverse 0.4",
+  a: "spin_left 0.15",
+  d: "spin_right 0.15",
+  " ": "stop",
+};
+const _AUTO_STOP_KEYS = new Set(["w", "s", "a", "d"]);
+
+function _isTypingInInput() {
+  const el = document.activeElement;
+  if (!el) return false;
+  const tag = el.tagName;
+  return tag === "INPUT" || tag === "TEXTAREA" || el.isContentEditable;
+}
+
+function setupKeyboardControls() {
+  document.addEventListener("keydown", async (event) => {
+    if (event.repeat) return;          // ignore OS auto-repeat
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    if (_isTypingInInput()) return;    // don't hijack the terminal / number inputs
+    const key = event.key.toLowerCase();
+    const cmd = _KEY_TO_COMMAND[key];
+    if (!cmd) return;
+    event.preventDefault();
+    await sendCommand(cmd).catch((error) => showNotice(friendlyErrorMessage(error)));
+  });
+  document.addEventListener("keyup", async (event) => {
+    if (_isTypingInInput()) return;
+    const key = event.key.toLowerCase();
+    if (!_AUTO_STOP_KEYS.has(key)) return;
+    event.preventDefault();
+    await sendCommand("stop").catch((error) => showNotice(friendlyErrorMessage(error)));
+  });
+}
+
+function _attachJoystick(joystickEl, handleEl) {
+  if (!joystickEl || !handleEl) return;
+
   const moveHandle = (x, y) => {
-    els.joystickHandle.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
+    handleEl.style.transform = `translate(calc(-50% + ${x}px), calc(-50% + ${y}px))`;
   };
 
   const update = async (clientX, clientY) => {
-    const rect = els.joystick.getBoundingClientRect();
+    const rect = joystickEl.getBoundingClientRect();
     const radius = rect.width / 2;
     const maxDistance = radius * 0.68;
     const centerX = rect.left + radius;
@@ -543,29 +1140,30 @@ function setupJoystick() {
   };
 
   const end = async () => {
-    if (!state.joystickActive) {
-      return;
-    }
+    if (!state.joystickActive) return;
     state.joystickActive = false;
     moveHandle(0, 0);
     await sendStop().catch(() => {});
   };
 
-  els.joystick.addEventListener("pointerdown", async (event) => {
+  joystickEl.addEventListener("pointerdown", async (event) => {
     state.joystickActive = true;
-    els.joystick.setPointerCapture(event.pointerId);
+    joystickEl.setPointerCapture(event.pointerId);
     await update(event.clientX, event.clientY);
   });
 
-  els.joystick.addEventListener("pointermove", async (event) => {
-    if (!state.joystickActive) {
-      return;
-    }
+  joystickEl.addEventListener("pointermove", async (event) => {
+    if (!state.joystickActive) return;
     await update(event.clientX, event.clientY);
   });
 
-  els.joystick.addEventListener("pointerup", end);
-  els.joystick.addEventListener("pointercancel", end);
+  joystickEl.addEventListener("pointerup", end);
+  joystickEl.addEventListener("pointercancel", end);
+}
+
+function setupJoystick() {
+  _attachJoystick(els.joystick, els.joystickHandle);
+  _attachJoystick(els.rlJoystick, els.rlJoystickHandle);
 }
 
 function attachCameraHandlers() {
@@ -603,6 +1201,7 @@ async function maybeReconnect() {
 async function bootstrap() {
   updateClock();
   window.setInterval(updateClock, 30000);
+  setupViewTabs();
   setupModeTabs();
   setupCameraResize();
   setupConnection();
@@ -611,6 +1210,9 @@ async function bootstrap() {
   setupQuickButtons();
   setupTerminal();
   setupJoystick();
+  setupKeyboardControls();
+  setupRecordControls();
+  setupRlControls();
   attachCameraHandlers();
   updateDistanceDraftView();
   setMode("live");

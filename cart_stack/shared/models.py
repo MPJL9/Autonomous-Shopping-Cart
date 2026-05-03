@@ -42,15 +42,61 @@ class VisionTrackingChange(BaseModel):
     enabled: bool
 
 
+class VisionModeChange(BaseModel):
+    mode: Literal["aruco", "yolo", "hog"]
+
+
 class MotorPinsChange(BaseModel):
-    left_pin: int = Field(ge=0, le=27)
-    right_pin: int = Field(ge=0, le=27)
+    left1_pin: int = Field(ge=0, le=27)
+    left2_pin: int = Field(ge=0, le=27)
+    right1_pin: int = Field(ge=0, le=27)
+    right2_pin: int = Field(ge=0, le=27)
+
+
+class MotorInvertChange(BaseModel):
+    left1_invert: bool = False
+    left2_invert: bool = False
+    right1_invert: bool = False
+    right2_invert: bool = False
 
 
 class MotorCalibrationChange(BaseModel):
-    left_trim: float = Field(ge=-1.0, le=1.0)
-    right_trim: float = Field(ge=-1.0, le=1.0)
+    left1_trim: float = Field(ge=-1.0, le=1.0)
+    left2_trim: float = Field(ge=-1.0, le=1.0)
+    right1_trim: float = Field(ge=-1.0, le=1.0)
+    right2_trim: float = Field(ge=-1.0, le=1.0)
     stop_deadband: float = Field(ge=0.0, le=0.2)
+
+
+class RlSessionStart(BaseModel):
+    policy: Literal[
+        "random", "zero", "forward", "manual",
+        # Live-obs corrected (current generation)
+        "bc_2d_combined_v2", "bc_2d_5_1only_v2",
+        "bc_2d_combined_v2_pivot", "bc_2d_combined_v2_translate",
+        # OLD combined restored for fallback testing
+        "bc_2d_combined_pre_fix",
+        "bc_2d_combined_pre_fix_pivot", "bc_2d_combined_pre_fix_translate",
+        # 4/29-only variants (historical naming)
+        "bc_2d", "bc_2d_mirror",
+        "bc_2d_pivot", "bc_2d_translate",
+        # AWR-refined bc_2d (offline RL on bc_2d_pivot rollouts)
+        "bc_2d_awr",
+        "bc_2d_awr_pivot", "bc_2d_awr_translate",
+    ] = "random"
+    max_steps: int = Field(default=300, ge=1, le=10000)
+    step_hz: float = Field(default=5.0, gt=0.0, le=30.0)
+    action_scale: float = Field(default=0.35, ge=0.0, le=1.0)
+
+
+class RlSessionStatus(BaseModel):
+    running: bool = False
+    policy: str = "random"
+    step: int = 0
+    max_steps: int = 0
+    last_reward: float = 0.0
+    total_reward: float = 0.0
+    log_path: str | None = None
 
 
 class TerminalCommand(BaseModel):
@@ -72,11 +118,25 @@ class RobotSnapshot(BaseModel):
     last_command: str = "idle"
     vision_enabled: bool = False
     vision_locked: bool = False
-    left_motor_pin: int = 18
-    right_motor_pin: int = 13
-    left_trim: float = 0.0
-    right_trim: float = 0.0
+    vision_mode: str = "aruco"
+    left1_motor_pin: int = 13
+    left2_motor_pin: int = 16
+    right1_motor_pin: int = 19
+    right2_motor_pin: int = 12
+    left1_invert: bool = False
+    left2_invert: bool = False
+    right1_invert: bool = True
+    right2_invert: bool = True
+    left1_trim: float = 0.0
+    left2_trim: float = 0.0
+    right1_trim: float = 0.0
+    right2_trim: float = 0.0
     stop_deadband: float = 0.04
+    rl_running: bool = False
+    rl_policy: str = "random"
+    rl_step: int = 0
+    rl_max_steps: int = 0
+    rl_total_reward: float = 0.0
     logs: list[str] = Field(default_factory=list)
     updated_at: str
 

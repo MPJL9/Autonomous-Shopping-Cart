@@ -18,9 +18,20 @@ class RobotCommandTarget(Protocol):
 
     async def set_vision_tracking(self, enabled: bool) -> None: ...
 
-    async def set_motor_pins(self, left_pin: int, right_pin: int) -> None: ...
+    async def set_vision_mode(self, mode: str) -> None: ...
 
-    async def set_motor_calibration(self, left_trim: float, right_trim: float, stop_deadband: float) -> None: ...
+    async def set_motor_pins(
+        self, left1_pin: int, left2_pin: int, right1_pin: int, right2_pin: int
+    ) -> None: ...
+
+    async def set_motor_calibration(
+        self,
+        left1_trim: float,
+        left2_trim: float,
+        right1_trim: float,
+        right2_trim: float,
+        stop_deadband: float,
+    ) -> None: ...
 
     async def snapshot(self) -> RobotSnapshot: ...
 
@@ -29,8 +40,9 @@ HELP_TEXT = (
     "Commands: help, stop, estop, reset, manual, auto, forward <0..1>, "
     "reverse <0..1>, left <0..1>, right <0..1>, spin_left <0..1>, "
     "spin_right <0..1>, drive <left> <right>, gap <meters>, "
-    "calibrate_distance, clear_calibration, follow_person, pins <left_gpio> <right_gpio>, "
-    "trim <left_trim> <right_trim> [deadband], status"
+    "calibrate_distance, clear_calibration, follow_person, "
+    "pins <l1> <l2> <r1> <r2>, "
+    "trim <l1> <l2> <r1> <r2> [deadband], status"
 )
 
 
@@ -100,25 +112,38 @@ async def execute_robot_command(command: str, target: RobotCommandTarget) -> tup
         snapshot = await target.snapshot()
         return "Live follow mode engaged.", snapshot
 
-    if action == "pins":
-        if len(tokens) != 3:
-            raise ValueError("Usage: pins <left_gpio> <right_gpio>")
-        left_pin = int(tokens[1])
-        right_pin = int(tokens[2])
-        await target.set_motor_pins(left_pin, right_pin)
+    if action == "vision":
+        if len(tokens) != 2:
+            raise ValueError("Usage: vision <aruco|yolo|hog>")
+        mode = tokens[1]
+        if mode not in ("aruco", "yolo", "hog"):
+            raise ValueError(f"Unknown vision mode {mode!r}. Valid: aruco, yolo, hog")
+        await target.set_vision_mode(mode)
         snapshot = await target.snapshot()
-        return f"Motor pins updated to left GPIO {left_pin}, right GPIO {right_pin}.", snapshot
+        return f"Vision mode set to {mode}.", snapshot
 
-    if action == "trim":
-        if len(tokens) not in {3, 4}:
-            raise ValueError("Usage: trim <left_trim> <right_trim> [deadband]")
-        left_trim = float(tokens[1])
-        right_trim = float(tokens[2])
-        stop_deadband = float(tokens[3]) if len(tokens) == 4 else 0.04
-        await target.set_motor_calibration(left_trim, right_trim, stop_deadband)
+    if action == "pins":
+        if len(tokens) != 5:
+            raise ValueError("Usage: pins <l1_gpio> <l2_gpio> <r1_gpio> <r2_gpio>")
+        pins = [int(tokens[i]) for i in range(1, 5)]
+        await target.set_motor_pins(*pins)
         snapshot = await target.snapshot()
         return (
-            f"Motor trims updated to left {left_trim:.3f}, right {right_trim:.3f}, deadband {stop_deadband:.3f}.",
+            f"Motor pins updated to L1={pins[0]} L2={pins[1]} R1={pins[2]} R2={pins[3]}.",
+            snapshot,
+        )
+
+    if action == "trim":
+        if len(tokens) not in {5, 6}:
+            raise ValueError("Usage: trim <l1> <l2> <r1> <r2> [deadband]")
+        trims = [float(tokens[i]) for i in range(1, 5)]
+        stop_deadband = float(tokens[5]) if len(tokens) == 6 else 0.04
+        await target.set_motor_calibration(*trims, stop_deadband)
+        snapshot = await target.snapshot()
+        return (
+            "Motor trims updated "
+            f"(L1={trims[0]:.2f} L2={trims[1]:.2f} R1={trims[2]:.2f} R2={trims[3]:.2f}, "
+            f"deadband {stop_deadband:.3f}).",
             snapshot,
         )
 

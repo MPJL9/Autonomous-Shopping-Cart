@@ -142,55 +142,89 @@ class Picamera2Source(CameraSource):
 
 
 class RpicamJpegSource(CameraSource):
-    def __init__(self) -> None:
-        self.width = int(os.getenv("CART_CAMERA_WIDTH", "1280"))
-        self.height = int(os.getenv("CART_CAMERA_HEIGHT", "720"))
-        self.quality = int(os.getenv("CART_CAMERA_QUALITY", "85"))
-        self.capture_timeout_s = float(os.getenv("CART_CAMERA_CAPTURE_TIMEOUT_SEC", "4.0"))
-        self.min_interval_s = float(os.getenv("CART_CAMERA_MIN_INTERVAL_SEC", "0.25"))
-        self._last_capture_at = 0.0
-        self._last_frame: bytes | None = None
-        self.fallback = SyntheticCameraSource(width=min(self.width, 960), height=min(self.height, 540))
+    """Persistent rpicam-vid process that streams MJPEG frames.
 
-    def _command(self) -> list[str]:
-        return [
-            "rpicam-jpeg",
+    Spawns rpicam-vid once and reads the continuous MJPEG output on a
+    background thread, keeping the most recent complete frame ready for
+    capture_jpeg. Avoids spawning a subprocess per frame, which was the
+    main reason FPS tanked on prior iterations.
+    """
+
+    def __init__(self) -> None:
+        import threading
+
+        self.width = int(os.getenv("CART_CAMERA_WIDTH", "640"))
+        self.height = int(os.getenv("CART_CAMERA_HEIGHT", "480"))
+        self.quality = int(os.getenv("CART_CAMERA_QUALITY", "60"))
+        self.framerate = int(os.getenv("CART_CAMERA_FRAMERATE", "15"))
+        self._lock = threading.Lock()
+        self._latest_frame: bytes | None = None
+        self._process: subprocess.Popen | None = None
+        self._reader_thread: threading.Thread | None = None
+        self._stopping = False
+        self.fallback = SyntheticCameraSource(width=min(self.width, 960), height=min(self.height, 540))
+        self._start_process()
+
+    def _start_process(self) -> None:
+        import threading
+
+        cmd = [
+            "rpicam-vid",
+            "-t", "0",
+            "--codec", "mjpeg",
+            "--width", str(self.width),
+            "--height", str(self.height),
+            "--framerate", str(self.framerate),
+            "-q", str(self.quality),
             "-n",
-            "-t",
-            "1",
-            "--immediate",
-            "--width",
-            str(self.width),
-            "--height",
-            str(self.height),
-            "--quality",
-            str(self.quality),
-            "-o",
-            "-",
+            "-o", "-",
         ]
+        self._process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        self._stopping = False
+        self._reader_thread = threading.Thread(target=self._read_frames, daemon=True)
+        self._reader_thread.start()
+
+    def _read_frames(self) -> None:
+        """Parse MJPEG frame boundaries from the persistent rpicam-vid stream."""
+        SOI = b"\xff\xd8"
+        EOI = b"\xff\xd9"
+        buf = b""
+        stdout = self._process.stdout
+        while not self._stopping and stdout:
+            chunk = stdout.read(4096)
+            if not chunk:
+                break
+            buf += chunk
+            while True:
+                start = buf.find(SOI)
+                if start == -1:
+                    buf = b""
+                    break
+                end = buf.find(EOI, start + 2)
+                if end == -1:
+                    buf = buf[start:]
+                    break
+                frame = buf[start:end + 2]
+                with self._lock:
+                    self._latest_frame = frame
+                buf = buf[end + 2:]
 
     def capture_jpeg(self, snapshot: RobotSnapshot) -> bytes:
-        now = time.monotonic()
-        if self._last_frame is not None and now - self._last_capture_at < self.min_interval_s:
-            return self._last_frame
-
-        try:
-            result = subprocess.run(
-                self._command(),
-                capture_output=True,
-                check=False,
-                timeout=self.capture_timeout_s,
-            )
-            if result.returncode == 0 and result.stdout:
-                self._last_capture_at = now
-                self._last_frame = result.stdout
-                return result.stdout
-        except Exception:
-            pass
-
-        if self._last_frame is not None:
-            return self._last_frame
+        with self._lock:
+            frame = self._latest_frame
+        if frame is not None:
+            return frame
         return self.fallback.capture_jpeg(snapshot)
+
+    def close(self) -> None:
+        self._stopping = True
+        if self._process is not None:
+            try:
+                self._process.terminate()
+                self._process.wait(timeout=3)
+            except Exception:
+                pass
+            self._process = None
 
 
 class ResilientCameraSource(CameraSource):

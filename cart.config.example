@@ -1,0 +1,9 @@
+# Copy this file to `cart.config` and edit the values for your setup.
+# start.sh and deploy_to_pi.sh will source cart.config automatically.
+
+# Pi network settings
+CART_PI_IP=192.168.0.221
+CART_PI_USER=veda
+
+# Remote project path on the Pi (usually fine as-is — matches the rsync destination)
+CART_PI_PROJECT_DIR=~/Autonomous-Shopping-Cart

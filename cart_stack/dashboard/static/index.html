@@ -41,12 +41,20 @@
           <span class="sb-val mono" id="deviceIp">10.65.142.17</span>
         </div>
         <div class="sb-row">
-          <span class="sb-lbl">Left GPIO</span>
-          <span class="sb-val mono" id="deviceLeftPin">18</span>
+          <span class="sb-lbl">L1 GPIO</span>
+          <span class="sb-val mono" id="deviceLeft1Pin">13</span>
         </div>
         <div class="sb-row">
-          <span class="sb-lbl">Right GPIO</span>
-          <span class="sb-val mono" id="deviceRightPin">13</span>
+          <span class="sb-lbl">L2 GPIO</span>
+          <span class="sb-val mono" id="deviceLeft2Pin">16</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">R1 GPIO</span>
+          <span class="sb-val mono" id="deviceRight1Pin">19</span>
+        </div>
+        <div class="sb-row">
+          <span class="sb-lbl">R2 GPIO</span>
+          <span class="sb-val mono" id="deviceRight2Pin">12</span>
         </div>
         <form id="connectForm" class="connect-stack">
           <label class="connect-label" for="targetInput">Pi Address</label>
@@ -68,19 +76,52 @@
         <form id="pinForm" class="pin-stack">
           <div class="pin-head">
             <span class="connect-label">Motor Pins (BCM)</span>
-            <span class="pin-note">Recommended pair: left 12, right 13</span>
+            <span class="pin-note">Four wheels: L1, L2, R1, R2</span>
           </div>
           <div class="pin-grid">
             <label>
-              <span class="pin-label">Left</span>
-              <input id="leftPinInput" name="leftPin" type="number" min="0" max="27" step="1" value="12" />
+              <span class="pin-label">L1</span>
+              <input id="left1PinInput" name="left1Pin" type="number" min="0" max="27" step="1" value="13" />
             </label>
             <label>
-              <span class="pin-label">Right</span>
-              <input id="rightPinInput" name="rightPin" type="number" min="0" max="27" step="1" value="13" />
+              <span class="pin-label">L2</span>
+              <input id="left2PinInput" name="left2Pin" type="number" min="0" max="27" step="1" value="16" />
+            </label>
+            <label>
+              <span class="pin-label">R1</span>
+              <input id="right1PinInput" name="right1Pin" type="number" min="0" max="27" step="1" value="19" />
+            </label>
+            <label>
+              <span class="pin-label">R2</span>
+              <input id="right2PinInput" name="right2Pin" type="number" min="0" max="27" step="1" value="12" />
             </label>
           </div>
           <button type="submit" class="btn-secondary">Apply Pins</button>
+        </form>
+        <form id="invertForm" class="pin-stack">
+          <div class="pin-head">
+            <span class="connect-label">Wheel Direction</span>
+            <span class="pin-note">Flip a wheel if it spins the wrong way</span>
+          </div>
+          <div class="pin-grid">
+            <label class="invert-toggle">
+              <span class="pin-label">L1</span>
+              <input id="left1InvertInput" type="checkbox" />
+            </label>
+            <label class="invert-toggle">
+              <span class="pin-label">L2</span>
+              <input id="left2InvertInput" type="checkbox" />
+            </label>
+            <label class="invert-toggle">
+              <span class="pin-label">R1</span>
+              <input id="right1InvertInput" type="checkbox" />
+            </label>
+            <label class="invert-toggle">
+              <span class="pin-label">R2</span>
+              <input id="right2InvertInput" type="checkbox" />
+            </label>
+          </div>
+          <button type="submit" class="btn-secondary">Apply Direction</button>
         </form>
         <form id="trimForm" class="pin-stack">
           <div class="pin-head">
@@ -89,12 +130,20 @@
           </div>
           <div class="pin-grid trim-grid">
             <label>
-              <span class="pin-label">Left Trim</span>
-              <input id="leftTrimInput" name="leftTrim" type="number" min="-1" max="1" step="0.01" value="0.00" />
+              <span class="pin-label">L1 Trim</span>
+              <input id="left1TrimInput" name="left1Trim" type="number" min="-1" max="1" step="0.01" value="0.00" />
             </label>
             <label>
-              <span class="pin-label">Right Trim</span>
-              <input id="rightTrimInput" name="rightTrim" type="number" min="-1" max="1" step="0.01" value="0.00" />
+              <span class="pin-label">L2 Trim</span>
+              <input id="left2TrimInput" name="left2Trim" type="number" min="-1" max="1" step="0.01" value="0.00" />
+            </label>
+            <label>
+              <span class="pin-label">R1 Trim</span>
+              <input id="right1TrimInput" name="right1Trim" type="number" min="-1" max="1" step="0.01" value="0.00" />
+            </label>
+            <label>
+              <span class="pin-label">R2 Trim</span>
+              <input id="right2TrimInput" name="right2Trim" type="number" min="-1" max="1" step="0.01" value="0.00" />
             </label>
             <label class="trim-span">
               <span class="pin-label">Stop Deadband</span>
@@ -154,6 +203,12 @@
 
           <div class="notice-banner" id="noticeBanner" hidden></div>
 
+          <div class="view-tabs" role="tablist" aria-label="Camera views">
+            <button class="view-tab active" type="button" data-view-tab="live">Live</button>
+            <button class="view-tab" type="button" data-view-tab="record">Record</button>
+            <button class="view-tab" type="button" data-view-tab="rl">RL Training</button>
+          </div>
+
           <div class="cam-vp" id="cameraViewport">
             <img class="cam-stream" id="remoteCamera" alt="Live Pi camera feed" hidden />
             <div class="cam-ov" id="cameraOverlay">
@@ -180,6 +235,7 @@
             </button>
           </div>
 
+          <div class="view-panel active" data-view-panel="live">
           <div class="mtabs" role="tablist" aria-label="Cart modes">
             <button class="mtab a" type="button" data-mode-tab="live">Live</button>
             <button class="mtab" type="button" data-mode-tab="manual">Manual</button>
@@ -202,6 +258,7 @@
                 <button type="button" class="abtn" id="engageFollowButton">Follow Person</button>
                 <button type="button" class="btn-o" id="holdPositionButton">Hold Position</button>
                 <button type="button" class="btn-o danger" id="captureFrameButton">Capture Frame</button>
+                <button type="button" class="btn-o" id="recordButton">Record</button>
               </div>
 
               <div class="target-gap-card">
@@ -281,12 +338,19 @@
                   <button type="button" data-command="forward 0.4">Forward</button>
                   <button type="button" data-command="left 0.35">Bias Left</button>
                   <button type="button" data-command="right 0.35">Bias Right</button>
-                  <button type="button" data-command="reverse 0.3">Reverse</button>
-                  <button type="button" data-command="spin_left 0.35">Spin Left</button>
-                  <button type="button" data-command="spin_right 0.35">Spin Right</button>
+                  <button type="button" data-command="reverse 0.4">Reverse</button>
+                  <button type="button" data-command="spin_left 0.15">Spin Left</button>
+                  <button type="button" data-command="spin_right 0.15">Spin Right</button>
                   <button type="button" data-command="manual">Manual</button>
                   <button type="button" data-command="stop">Stop</button>
                   <button type="button" data-command="estop">Estop</button>
+                </div>
+
+                <div class="manual-actions" style="margin-top:6px">
+                  <span class="pin-label" style="align-self:center;margin-right:6px">Vision:</span>
+                  <button type="button" data-command="vision aruco" id="visionModeArucoBtn">ArUco (marker)</button>
+                  <button type="button" data-command="vision yolo"  id="visionModeYoloBtn">YOLO (markerless)</button>
+                  <strong class="mini-value" id="visionModeReadout" style="align-self:center;margin-left:auto">mode: aruco</strong>
                 </div>
               </div>
 
@@ -322,6 +386,201 @@
               </div>
             </div>
           </section>
+
+          </div>
+
+          <div class="view-panel" data-view-panel="record">
+            <div class="panel-card">
+              <div class="panel-head">
+                <div>
+                  <h3>Record Video</h3>
+                  <p>Capture the live camera feed to a WebM file in the browser. The clip downloads when you stop.</p>
+                </div>
+                <div class="panel-badge" id="recordBadge">Idle</div>
+              </div>
+              <div class="control-grid">
+                <button type="button" class="abtn" id="recordStartButton">Start Recording</button>
+                <button type="button" class="btn-o danger" id="recordStopButton" disabled>Stop &amp; Download</button>
+              </div>
+              <div class="live-metrics">
+                <article class="mini-card">
+                  <span class="mini-label">Duration</span>
+                  <strong class="mini-value" id="recordDuration">00:00</strong>
+                </article>
+                <article class="mini-card">
+                  <span class="mini-label">Frames</span>
+                  <strong class="mini-value" id="recordFrames">0</strong>
+                </article>
+                <article class="mini-card">
+                  <span class="mini-label">Status</span>
+                  <strong class="mini-value" id="recordStatusValue">idle</strong>
+                </article>
+              </div>
+              <p class="distance-note">
+                Recording runs entirely in your browser — nothing is written to the Pi. Connect to the Pi
+                and wait for the live stream to start before you hit Start Recording. For RL data
+                collection, use <strong>Start Exploration + Record</strong> in the RL Training tab instead —
+                it starts and stops the video with the RL session automatically.
+              </p>
+            </div>
+          </div>
+
+          <div class="view-panel" data-view-panel="rl">
+            <div class="panel-card">
+              <div class="panel-head">
+                <div>
+                  <h3>RL Training (Placeholder)</h3>
+                  <p>
+                    Runs a scripted exploration policy on the cart and logs
+                    (obs, action, reward, done) tuples to a JSONL file on the Pi.
+                    Simultaneously records the live camera feed in the browser so
+                    video and action log stay paired. Download Session Bundle saves
+                    log + video + a <code>.meta.json</code> sidecar with clock-alignment info.
+                  </p>
+                </div>
+                <div class="panel-badge" id="rlBadge">Idle</div>
+              </div>
+              <form id="rlForm" class="pin-stack">
+                <div class="pin-grid trim-grid">
+                  <label>
+                    <span class="pin-label">Policy</span>
+                    <select id="rlPolicyInput" name="rlPolicy">
+                      <option value="manual">manual (human drives, we log)</option>
+                      <option value="random" selected>random</option>
+                      <option value="zero">zero</option>
+                      <option value="forward">forward</option>
+                      <optgroup label="Combined (4/29 + 5/1, live-obs corrected)">
+                        <option value="bc_2d_combined_v2">bc_2d_combined_v2</option>
+                        <option value="bc_2d_combined_v2_pivot">bc_2d_combined_v2 + Tier 1 (heading P)</option>
+                        <option value="bc_2d_combined_v2_translate">bc_2d_combined_v2 + Tier 2 (pivot-translate-pivot)</option>
+                        <option value="bc_2d_5_1only_v2">bc_2d_5_1only_v2</option>
+                      </optgroup>
+                      <optgroup label="OLD combined (pre-fix; tier-1 known to work)">
+                        <option value="bc_2d_combined_pre_fix">bc_2d_combined_pre_fix</option>
+                        <option value="bc_2d_combined_pre_fix_pivot">bc_2d_combined_pre_fix + Tier 1</option>
+                        <option value="bc_2d_combined_pre_fix_translate">bc_2d_combined_pre_fix + Tier 2</option>
+                      </optgroup>
+                      <optgroup label="4/29 only">
+                        <option value="bc_2d">bc_2d (no mirror)</option>
+                        <option value="bc_2d_mirror">bc_2d_mirror</option>
+                        <option value="bc_2d_pivot">bc_2d + Tier 1</option>
+                        <option value="bc_2d_translate">bc_2d + Tier 2</option>
+                      </optgroup>
+                      <optgroup label="AWR-refined (offline RL on bc_2d_pivot rollouts)">
+                        <option value="bc_2d_awr">bc_2d_awr</option>
+                        <option value="bc_2d_awr_pivot">bc_2d_awr + Tier 1</option>
+                        <option value="bc_2d_awr_translate">bc_2d_awr + Tier 2</option>
+                      </optgroup>
+                    </select>
+                  </label>
+                  <label>
+                    <span class="pin-label">Max Steps</span>
+                    <input id="rlMaxStepsInput" type="number" min="1" max="10000" step="1" value="300" />
+                  </label>
+                  <label>
+                    <span class="pin-label">Step Hz</span>
+                    <input id="rlStepHzInput" type="number" min="0.5" max="30" step="0.5" value="5" />
+                  </label>
+                  <label>
+                    <span class="pin-label">Action Scale</span>
+                    <input id="rlActionScaleInput" type="number" min="0" max="1" step="0.05" value="0.8" />
+                  </label>
+                </div>
+                <div class="control-grid">
+                  <button type="submit" class="abtn" id="rlStartButton">Start Exploration + Record</button>
+                  <button type="button" class="btn-o danger" id="rlStopButton" disabled>Stop</button>
+                  <button type="button" class="btn-o" id="rlDownloadLogButton">Download Session Bundle</button>
+                </div>
+                <div class="control-grid">
+                  <button type="button" class="abtn" id="rlInstallBundledButton">Install Bundled Policies (6 slots)</button>
+                  <input type="file" id="rlPolicyFileInput" accept=".npz" style="display:none" />
+                  <button type="button" class="btn-o" id="rlUploadPolicyButton">Upload Custom (.npz)</button>
+                </div>
+                <div class="live-metrics" style="margin-top: 6px">
+                  <article class="mini-card">
+                    <span class="mini-label">bc_2d_combined_v2 slot</span>
+                    <strong class="mini-value" id="rlPolicyCombinedInfo">—</strong>
+                  </article>
+                  <article class="mini-card">
+                    <span class="mini-label">bc_2d_5_1only_v2 slot</span>
+                    <strong class="mini-value" id="rlPolicy51OnlyInfo">—</strong>
+                  </article>
+                  <article class="mini-card">
+                    <span class="mini-label">bc_2d_combined_pre_fix slot</span>
+                    <strong class="mini-value" id="rlPolicyPreFixInfo">—</strong>
+                  </article>
+                  <article class="mini-card">
+                    <span class="mini-label">bc_2d slot (4/29)</span>
+                    <strong class="mini-value" id="rlPolicy4_29Info">—</strong>
+                  </article>
+                  <article class="mini-card">
+                    <span class="mini-label">bc_2d_mirror slot (4/29)</span>
+                    <strong class="mini-value" id="rlPolicy4_29MirrorInfo">—</strong>
+                  </article>
+                  <article class="mini-card">
+                    <span class="mini-label">bc_2d_awr slot</span>
+                    <strong class="mini-value" id="rlPolicyAwrInfo">—</strong>
+                  </article>
+                </div>
+
+                <div class="panel-head" style="margin-top: 16px">
+                  <div>
+                    <h4>Drive during recording (policy=manual)</h4>
+                    <p>
+                      Use this joystick and the quick buttons to drive while a
+                      <code>manual</code> RL session is running — the session logs
+                      your joystick state each step without overriding it.
+                    </p>
+                  </div>
+                </div>
+                <div class="manual-grid">
+                  <div class="manual-joystick">
+                    <div class="joystick" id="rlJoystick">
+                      <div class="joystick-ring"></div>
+                      <div class="joystick-axis horizontal"></div>
+                      <div class="joystick-axis vertical"></div>
+                      <div class="joystick-handle" id="rlJoystickHandle"></div>
+                    </div>
+                    <div class="joystick-caption">
+                      <strong id="rlJoystickReadout">L 0.00 / R 0.00</strong>
+                      <small>Drag to steer. Let go to send stop.</small>
+                    </div>
+                  </div>
+                  <div class="manual-actions">
+                    <button type="button" data-command="forward 0.4">Forward</button>
+                    <button type="button" data-command="left 0.35">Bias Left</button>
+                    <button type="button" data-command="right 0.35">Bias Right</button>
+                    <button type="button" data-command="reverse 0.4">Reverse</button>
+                    <button type="button" data-command="spin_left 0.15">Spin Left</button>
+                    <button type="button" data-command="spin_right 0.15">Spin Right</button>
+                    <button type="button" data-command="stop">Stop</button>
+                    <button type="button" data-command="estop">Estop</button>
+                  </div>
+                </div>
+              </form>
+              <div class="live-metrics">
+                <article class="mini-card">
+                  <span class="mini-label">Step</span>
+                  <strong class="mini-value" id="rlStepValue">0 / 0</strong>
+                </article>
+                <article class="mini-card">
+                  <span class="mini-label">Total Reward</span>
+                  <strong class="mini-value" id="rlRewardValue">0.00</strong>
+                </article>
+                <article class="mini-card">
+                  <span class="mini-label">Policy</span>
+                  <strong class="mini-value" id="rlPolicyValue">idle</strong>
+                </article>
+              </div>
+              <p class="distance-note" id="rlLogNote">
+                Observation: <code>[distance_m, heading_rad, linear_vel, angular_vel]</code> ·
+                Action: <code>[left, right]</code> ·
+                Reward: <code>-(distance - target_gap)^2</code>.
+                Video is buffered in the browser while the session runs, then
+                downloaded alongside the log when you press Download Session Bundle.
+              </p>
+            </div>
+          </div>
 
           <section class="terminal-card">
             <div class="terminal-head">

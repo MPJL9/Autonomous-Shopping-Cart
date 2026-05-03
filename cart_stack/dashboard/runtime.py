@@ -46,10 +46,19 @@ class MockRobotBackend:
         self._last_command = "idle"
         self._vision_enabled = False
         self._vision_locked = False
-        self._left_motor_pin = 18
-        self._right_motor_pin = 13
-        self._left_trim = 0.0
-        self._right_trim = 0.0
+        self._vision_mode = "aruco"
+        self._left1_motor_pin = 13
+        self._left2_motor_pin = 16
+        self._right1_motor_pin = 19
+        self._right2_motor_pin = 12
+        self._left1_invert = False
+        self._left2_invert = False
+        self._right1_invert = True
+        self._right2_invert = True
+        self._left1_trim = 0.0
+        self._left2_trim = 0.0
+        self._right1_trim = 0.0
+        self._right2_trim = 0.0
         self._stop_deadband = 0.04
         self._logs: deque[str] = deque(maxlen=64)
         self._last_update = time.perf_counter()
@@ -163,23 +172,57 @@ class MockRobotBackend:
             self._last_command = "calibrate_distance" if enabled else "clear_calibration"
             self._log("Vision tracking armed." if enabled else "Vision tracking cleared.")
 
-    async def set_motor_pins(self, left_pin: int, right_pin: int) -> None:
+    async def set_vision_mode(self, mode: str) -> None:
+        # Mock backend just stores the mode for UI consistency.
         async with self._lock:
-            self._left_motor_pin = left_pin
-            self._right_motor_pin = right_pin
-            self._last_command = f"pins {left_pin} {right_pin}"
-            self._log(f"Motor pins updated to left GPIO {left_pin}, right GPIO {right_pin}.")
+            self._vision_mode = mode
+            self._last_command = f"vision_mode {mode}"
+            self._log(f"Vision mode set to {mode}.")
 
-    async def set_motor_calibration(self, left_trim: float, right_trim: float, stop_deadband: float) -> None:
+    async def set_motor_pins(
+        self, left1_pin: int, left2_pin: int, right1_pin: int, right2_pin: int
+    ) -> None:
         async with self._lock:
-            self._left_trim = left_trim
-            self._right_trim = right_trim
-            self._stop_deadband = stop_deadband
-            self._last_command = f"trim {left_trim:.3f} {right_trim:.3f} {stop_deadband:.3f}"
+            self._left1_motor_pin = left1_pin
+            self._left2_motor_pin = left2_pin
+            self._right1_motor_pin = right1_pin
+            self._right2_motor_pin = right2_pin
+            self._last_command = f"pins {left1_pin} {left2_pin} {right1_pin} {right2_pin}"
             self._log(
-                "Motor calibration updated "
-                f"(left trim {left_trim:.3f}, right trim {right_trim:.3f}, deadband {stop_deadband:.3f})."
+                f"Motor pins updated to L1={left1_pin} L2={left2_pin} R1={right1_pin} R2={right2_pin}."
             )
+
+    async def set_motor_inverts(
+        self, left1_invert: bool, left2_invert: bool, right1_invert: bool, right2_invert: bool
+    ) -> None:
+        async with self._lock:
+            self._left1_invert = left1_invert
+            self._left2_invert = left2_invert
+            self._right1_invert = right1_invert
+            self._right2_invert = right2_invert
+            self._last_command = (
+                f"invert {int(left1_invert)} {int(left2_invert)} {int(right1_invert)} {int(right2_invert)}"
+            )
+            self._log("Motor inverts updated.")
+
+    async def set_motor_calibration(
+        self,
+        left1_trim: float,
+        left2_trim: float,
+        right1_trim: float,
+        right2_trim: float,
+        stop_deadband: float,
+    ) -> None:
+        async with self._lock:
+            self._left1_trim = left1_trim
+            self._left2_trim = left2_trim
+            self._right1_trim = right1_trim
+            self._right2_trim = right2_trim
+            self._stop_deadband = stop_deadband
+            self._last_command = (
+                f"trim {left1_trim:.2f} {left2_trim:.2f} {right1_trim:.2f} {right2_trim:.2f} {stop_deadband:.3f}"
+            )
+            self._log("Motor calibration updated.")
 
     async def snapshot(self) -> RobotSnapshot:
         async with self._lock:
@@ -199,10 +242,19 @@ class MockRobotBackend:
                 last_command=self._last_command,
                 vision_enabled=self._vision_enabled,
                 vision_locked=self._vision_locked,
-                left_motor_pin=self._left_motor_pin,
-                right_motor_pin=self._right_motor_pin,
-                left_trim=round(self._left_trim, 3),
-                right_trim=round(self._right_trim, 3),
+                vision_mode=getattr(self, "_vision_mode", "aruco"),
+                left1_motor_pin=self._left1_motor_pin,
+                left2_motor_pin=self._left2_motor_pin,
+                right1_motor_pin=self._right1_motor_pin,
+                right2_motor_pin=self._right2_motor_pin,
+                left1_invert=self._left1_invert,
+                left2_invert=self._left2_invert,
+                right1_invert=self._right1_invert,
+                right2_invert=self._right2_invert,
+                left1_trim=round(self._left1_trim, 3),
+                left2_trim=round(self._left2_trim, 3),
+                right1_trim=round(self._right1_trim, 3),
+                right2_trim=round(self._right2_trim, 3),
                 stop_deadband=round(self._stop_deadband, 3),
                 logs=list(self._logs),
                 updated_at=_now_iso(),
@@ -247,15 +299,110 @@ class RemoteRobotBackend:
     async def set_vision_tracking(self, enabled: bool) -> None:
         await self._request("POST", "/api/vision/tracking", {"enabled": enabled})
 
-    async def set_motor_pins(self, left_pin: int, right_pin: int) -> None:
-        await self._request("POST", "/api/motor-pins", {"left_pin": left_pin, "right_pin": right_pin})
+    async def set_vision_mode(self, mode: str) -> None:
+        await self._request("POST", "/api/vision/mode", {"mode": mode})
 
-    async def set_motor_calibration(self, left_trim: float, right_trim: float, stop_deadband: float) -> None:
+    async def set_motor_pins(
+        self, left1_pin: int, left2_pin: int, right1_pin: int, right2_pin: int
+    ) -> None:
+        await self._request(
+            "POST",
+            "/api/motor-pins",
+            {
+                "left1_pin": left1_pin,
+                "left2_pin": left2_pin,
+                "right1_pin": right1_pin,
+                "right2_pin": right2_pin,
+            },
+        )
+
+    async def set_motor_inverts(
+        self, left1_invert: bool, left2_invert: bool, right1_invert: bool, right2_invert: bool
+    ) -> None:
+        await self._request(
+            "POST",
+            "/api/motor-inverts",
+            {
+                "left1_invert": left1_invert,
+                "left2_invert": left2_invert,
+                "right1_invert": right1_invert,
+                "right2_invert": right2_invert,
+            },
+        )
+
+    async def set_motor_calibration(
+        self,
+        left1_trim: float,
+        left2_trim: float,
+        right1_trim: float,
+        right2_trim: float,
+        stop_deadband: float,
+    ) -> None:
         await self._request(
             "POST",
             "/api/motor-calibration",
-            {"left_trim": left_trim, "right_trim": right_trim, "stop_deadband": stop_deadband},
+            {
+                "left1_trim": left1_trim,
+                "left2_trim": left2_trim,
+                "right1_trim": right1_trim,
+                "right2_trim": right2_trim,
+                "stop_deadband": stop_deadband,
+            },
         )
+
+    async def rl_start(self, payload: dict) -> None:
+        await self._request("POST", "/api/rl/start", payload)
+
+    async def rl_stop(self) -> None:
+        await self._request("POST", "/api/rl/stop")
+
+    async def rl_log_list(self) -> dict:
+        try:
+            response = await self._client.get("/api/rl/log/list")
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"RL log list failed: {exc}") from exc
+        return response.json()
+
+    async def rl_log_stream(self, name: str | None):
+        """Stream the raw bytes of an RL log file (latest if name is None)."""
+        path = "/api/rl/log"
+        params = {"name": name} if name else {}
+        try:
+            async with self._client.stream("GET", path, params=params) as response:
+                response.raise_for_status()
+                filename = None
+                disposition = response.headers.get("content-disposition", "")
+                if "filename=" in disposition:
+                    filename = disposition.split("filename=", 1)[1].strip('"; ')
+                yield {"filename": filename}
+                async for chunk in response.aiter_bytes():
+                    yield chunk
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"RL log download failed: {exc}") from exc
+
+    async def rl_policy_info(self) -> dict:
+        try:
+            response = await self._client.get("/api/rl/policy/info")
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Policy info failed: {exc}") from exc
+        return response.json()
+
+    async def rl_policy_upload(self, body: bytes, slot: str | None = None) -> dict:
+        params = {"slot": slot} if slot else None
+        try:
+            response = await self._client.post(
+                "/api/rl/policy/upload",
+                content=body,
+                params=params,
+                headers={"Content-Type": "application/octet-stream"},
+                timeout=30.0,
+            )
+            response.raise_for_status()
+        except httpx.HTTPError as exc:
+            raise RuntimeError(f"Policy upload failed: {exc}") from exc
+        return response.json()
 
     async def snapshot(self) -> RobotSnapshot:
         return await self._request("GET", "/api/status")

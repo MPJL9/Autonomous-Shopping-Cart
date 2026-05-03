@@ -32,11 +32,17 @@ class VisionEstimate:
 class ArUcoVisionTracker:
     """Precise distance/heading estimation using ArUco markers and calibrated camera."""
 
+    mode = "aruco"
+
     def __init__(self) -> None:
         self.enabled = cv2 is not None and np is not None
 
-        # Calibration file produced by aruco/calibration/calibrate_camera.py
-        calib_path = os.getenv("CART_ARUCO_CALIB_FILE", "calib.npz")
+        # Calibration file produced by aruco/calibration/calibrate_camera.py.
+        # Default: look for calib.npz next to this module (bundled with the
+        # package). Override with CART_ARUCO_CALIB_FILE if you recalibrate.
+        _bundled_calib = Path(__file__).resolve().parent / "calib.npz"
+        calib_path = os.getenv("CART_ARUCO_CALIB_FILE", str(_bundled_calib))
+        # Physical marker the operator wears: ArUco id 2, 15 cm side, dict 4x4_50.
         self._marker_length_m = float(os.getenv("CART_ARUCO_MARKER_SIZE_CM", "15")) / 100.0
         dict_name = os.getenv("CART_ARUCO_DICT", "DICT_4X4_50")
         self._target_marker_id: int | None = None
@@ -165,15 +171,241 @@ class ArUcoVisionTracker:
         )
 
 
-def build_vision_tracker() -> ArUcoVisionTracker | PersonVisionTracker:
-    """Factory: select tracker based on CART_VISION_MODE env var."""
-    mode = os.getenv("CART_VISION_MODE", "hog").lower()
-    if mode == "aruco":
-        return ArUcoVisionTracker()
-    return PersonVisionTracker()
+# ---------------------------------------------------------------------------
+# YOLO markerless tracker (closed-form torso-norm regressor)
+# ---------------------------------------------------------------------------
+
+# COCO 17-keypoint indices used by YOLOv8-Pose
+_KP_NOSE          = 0
+_KP_LEFT_SHOULDER = 5
+_KP_RIGHT_SHOULDER = 6
+_KP_LEFT_HIP      = 11
+_KP_RIGHT_HIP     = 12
+
+# Skeleton edges for overlay drawing
+_COCO_SKELETON = [
+    (0, 1), (0, 2), (1, 3), (2, 4),
+    (5, 6), (5, 7), (7, 9), (6, 8), (8, 10),
+    (5, 11), (6, 12), (11, 12),
+    (11, 13), (13, 15), (12, 14), (14, 16),
+]
+
+
+class YoloTorsoVisionTracker:
+    """Markerless distance + heading via YOLOv8-Pose torso length.
+
+    Fits the closed-form regressor `d = a / torso_norm + b` where
+    torso_norm is the (shoulder-mid → hip-mid) Euclidean distance in
+    pixels divided by image height. Constants `a, b` come from
+    yolo_distance_head.json (offline fit against ArUco ground truth).
+
+    Bearing is recovered geometrically from the torso center keypoint:
+    `theta = atan((x_center - cx) / fx)`. Camera intrinsics come from
+    the same calib.npz the ArUco tracker uses, so the two trackers'
+    bearing units agree.
+
+    Lazily loads the YOLO model on first call to `annotate()` so that
+    importing this module never pays for the model load.
+    """
+
+    mode = "yolo"
+
+    def __init__(self) -> None:
+        self.enabled = False
+        self._model = None
+        self._weights_path = os.getenv(
+            "CART_YOLO_WEIGHTS",
+            str(Path(__file__).resolve().parent / "yolov8n-pose.pt"),
+        )
+        self._head_path = os.getenv(
+            "CART_YOLO_HEAD",
+            str(Path(__file__).resolve().parent / "yolo_distance_head.json"),
+        )
+        self._kp_conf_thr = float(os.getenv("CART_YOLO_KP_CONF", "0.30"))
+        self._smooth_alpha = 0.4
+        self._last_distance: float | None = None
+        self._last_heading: float | None = None
+        self._a: float = 0.0
+        self._b: float = 0.0
+        self._fx: float = 0.0
+        self._cx: float = 0.0
+        self._load_head()
+        self._load_intrinsics()
+
+    def _load_head(self) -> None:
+        import json
+        try:
+            with open(self._head_path, "r") as f:
+                head = json.load(f)
+            self._a = float(head["distance"]["a"])
+            self._b = float(head["distance"]["b"])
+        except Exception:
+            # Fall back to the simple_tilted defaults from offline fit
+            self._a = 0.01378
+            self._b = 1.051
+
+    def _load_intrinsics(self) -> None:
+        if cv2 is None or np is None:
+            return
+        _bundled_calib = Path(__file__).resolve().parent / "calib.npz"
+        calib_path = os.getenv("CART_ARUCO_CALIB_FILE", str(_bundled_calib))
+        p = Path(calib_path)
+        if p.exists():
+            try:
+                calib = np.load(str(p))
+                self._fx = float(calib["K"][0, 0])
+                self._cx = float(calib["K"][0, 2])
+            except Exception:
+                pass
+        if self._fx <= 0:
+            # FOV-based fallback (HFOV~62.2 default)
+            hfov = math.radians(float(os.getenv("CART_CAMERA_HORIZONTAL_FOV_DEG", "62.2")))
+            self._fx = (640 / 2.0) / math.tan(hfov / 2.0)
+            self._cx = 320.0
+
+    def _ensure_model(self) -> None:
+        if self._model is not None:
+            return
+        try:
+            from ultralytics import YOLO  # type: ignore
+        except Exception:
+            return
+        if not Path(self._weights_path).exists():
+            return
+        try:
+            self._model = YOLO(self._weights_path)
+            self.enabled = (cv2 is not None and np is not None)
+        except Exception:
+            self._model = None
+
+    def _draw_overlay(self, frame, kpts, confs, distance_m, heading_rad) -> None:
+        thr = self._kp_conf_thr
+        for a, b in _COCO_SKELETON:
+            if a < len(confs) and b < len(confs) and confs[a] >= thr and confs[b] >= thr:
+                pa = tuple(kpts[a].astype(int))
+                pb = tuple(kpts[b].astype(int))
+                cv2.line(frame, pa, pb, (0, 200, 255), 2)
+        for i in range(len(kpts)):
+            if confs[i] >= thr:
+                cv2.circle(frame, tuple(kpts[i].astype(int)), 3, (0, 200, 255), -1)
+        # Torso highlight (the segment driving the distance estimate)
+        if all(confs[k] >= thr for k in (_KP_LEFT_SHOULDER, _KP_RIGHT_SHOULDER, _KP_LEFT_HIP, _KP_RIGHT_HIP)):
+            sm = ((kpts[_KP_LEFT_SHOULDER] + kpts[_KP_RIGHT_SHOULDER]) / 2).astype(int)
+            hm = ((kpts[_KP_LEFT_HIP] + kpts[_KP_RIGHT_HIP]) / 2).astype(int)
+            cv2.line(frame, tuple(sm), tuple(hm), (0, 255, 0), 3)
+            label = f"YOLO {distance_m:.2f}m | {heading_rad:+.2f}rad"
+            cv2.putText(frame, label, (int(sm[0]) - 80, int(sm[1]) - 20),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 255, 0), 2)
+
+    def annotate(self, jpeg_bytes: bytes) -> VisionEstimate:
+        self._ensure_model()
+        if not self.enabled or cv2 is None or np is None or self._model is None:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        frame = cv2.imdecode(np.frombuffer(jpeg_bytes, dtype=np.uint8), cv2.IMREAD_COLOR)
+        if frame is None:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+        h, w = frame.shape[:2]
+
+        try:
+            results = self._model(frame, verbose=False)
+        except Exception:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        if not results or results[0].keypoints is None or len(results[0].keypoints) == 0:
+            self._last_distance = None
+            self._last_heading = None
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        # Pick the most-confident person (largest bbox if confidence ties)
+        boxes = results[0].boxes
+        if boxes is None or len(boxes) == 0:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+        confs_box = boxes.conf.cpu().numpy()
+        best_i = int(np.argmax(confs_box))
+
+        kpts_xy = results[0].keypoints.xy[best_i].cpu().numpy()       # (17, 2)
+        kpts_c  = results[0].keypoints.conf[best_i].cpu().numpy()      # (17,)
+
+        thr = self._kp_conf_thr
+        needed = (_KP_LEFT_SHOULDER, _KP_RIGHT_SHOULDER, _KP_LEFT_HIP, _KP_RIGHT_HIP)
+        if any(kpts_c[k] < thr for k in needed):
+            # Cannot compute torso → no estimate this frame
+            self._draw_overlay(frame, kpts_xy, kpts_c, 0.0, 0.0)
+            ok, encoded = cv2.imencode(".jpg", frame)
+            return VisionEstimate(
+                frame_jpeg=encoded.tobytes() if ok else jpeg_bytes,
+                locked=False,
+            )
+
+        sh_mid = (kpts_xy[_KP_LEFT_SHOULDER] + kpts_xy[_KP_RIGHT_SHOULDER]) / 2.0
+        hp_mid = (kpts_xy[_KP_LEFT_HIP]      + kpts_xy[_KP_RIGHT_HIP])      / 2.0
+        torso_px = float(np.linalg.norm(sh_mid - hp_mid))
+        torso_norm = torso_px / max(h, 1)
+
+        if torso_norm < 1e-3:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        distance_m = self._a / torso_norm + self._b
+
+        # Bearing from torso center keypoint
+        center_x = float((sh_mid[0] + hp_mid[0]) / 2.0)
+        if self._fx <= 0:
+            heading_rad = 0.0
+        else:
+            heading_rad = math.atan2(center_x - self._cx, self._fx)
+
+        # EMA smoothing — same form ArUco tracker uses
+        if self._last_distance is not None:
+            a = self._smooth_alpha
+            distance_m = self._last_distance * (1 - a) + distance_m * a
+            heading_rad = self._last_heading * (1 - a) + heading_rad * a
+        self._last_distance = distance_m
+        self._last_heading = heading_rad
+
+        self._draw_overlay(frame, kpts_xy, kpts_c, distance_m, heading_rad)
+        ok, encoded = cv2.imencode(".jpg", frame)
+        if not ok:
+            return VisionEstimate(frame_jpeg=jpeg_bytes, locked=False)
+
+        return VisionEstimate(
+            frame_jpeg=encoded.tobytes(),
+            locked=True,
+            distance_m=distance_m,
+            heading_rad=heading_rad,
+        )
+
+
+VISION_MODES = ("aruco", "yolo", "hog")
+
+
+def build_vision_tracker(mode: str | None = None):
+    """Factory: select tracker by mode (or by CART_VISION_MODE env var).
+
+    Modes:
+      - aruco (default): worn marker, ArUco PnP -> sub-cm accurate
+      - yolo : markerless, YOLOv8-Pose torso length -> closed-form distance
+      - hog  : legacy bbox-based markerless (kept for backwards compat;
+               not the path used by the trained BC policies)
+
+    The trained BC policies were supervised on ArUco-derived distance, so
+    `aruco` and `yolo` produce the same distribution at deployment time
+    (both are fit to ArUco ground truth). HOG is a different geometric
+    estimator and does *not* match the training distribution.
+    """
+    if mode is None:
+        mode = os.getenv("CART_VISION_MODE", "aruco").lower()
+    mode = mode.lower()
+    if mode == "yolo":
+        return YoloTorsoVisionTracker()
+    if mode == "hog":
+        return PersonVisionTracker()
+    return ArUcoVisionTracker()
 
 
 class PersonVisionTracker:
+    mode = "hog"
+
     def __init__(self) -> None:
         self.enabled = cv2 is not None and np is not None
         self._detection_interval_s = float(os.getenv("CART_VISION_INTERVAL_SEC", "0.45"))

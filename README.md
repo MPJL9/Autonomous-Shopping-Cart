@@ -1,5 +1,9 @@
 # Autonomous Shopping Cart
 
+<p align="center">
+  <img src="docs/img/cart_hardware.jpg" alt="Cart prototype" width="55%">
+</p>
+
 Vision-based follower cart. The cart sees a person via a Pi camera, infers
 distance and bearing from an ArUco marker, and commands four
 continuous-rotation servos through a behavior-cloning policy fine-tuned
@@ -7,6 +11,25 @@ with offline RL (AWR).
 
 > CSCI3387.01 – Topics in Computational Intelligence — Tyler Potsiadlo,
 > Tianxiang Liu, Vedarsh Mishra.
+
+## What it does
+
+The Pi runs ArUco detection on every frame and recovers operator
+distance + heading via `cv2.solvePnP`:
+
+<p align="center">
+  <img src="docs/img/fig_aruco_overlay.png" alt="ArUco overlay" width="45%">
+</p>
+
+The four-dimensional observation $(d, \theta, \dot{x}, \dot{\theta})$
+feeds a small MLP behavior-cloning policy that emits independent
+left/right wheel commands. We then do a second offline-RL pass
+(Advantage-Weighted Regression) on top of the BC, using on-cart
+rollouts as the reward-bearing data:
+
+<p align="center">
+  <img src="docs/img/fig_policy_response.png" alt="BC vs AWR response curves" width="80%">
+</p>
 
 ## Repo layout
 

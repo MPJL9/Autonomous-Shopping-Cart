@@ -4,6 +4,11 @@
   <img src="docs/img/cart_hardware.jpg" alt="Cart prototype" width="55%">
 </p>
 
+<p align="center">
+  <img src="docs/img/demo_awr_pivot.gif" alt="AWR-refined autonomous follow" width="55%">
+  <br><em>AWR-refined policy following the operator autonomously.</em>
+</p>
+
 Vision-based follower cart. The cart sees a person via a Pi camera, infers
 distance and bearing from an ArUco marker, and commands four
 continuous-rotation servos through a behavior-cloning policy fine-tuned

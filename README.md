@@ -84,6 +84,13 @@ Open the dashboard, connect to the Pi, click **Install Bundled Policies**,
 then run an RL session under `bc_2d_pivot` (4/29 BC + heading P-controller)
 or `bc_2d_awr_pivot` (AWR-refined version of the same).
 
+<p align="center">
+  <img src="docs/img/dashboard.png" alt="Dashboard UI" width="85%">
+  <br><em>Dashboard: device controls and calibration on the left, live
+  camera feed with ArUco overlay in the center, RL training / policy
+  selection and manual teleop on the right.</em>
+</p>
+
 ## Quick start — train a new policy from scratch
 
 The full training pipeline is reproducible from the bundled 4/29 data:
